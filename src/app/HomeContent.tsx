@@ -1,0 +1,356 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import ConfigForm from '@/components/ConfigForm';
+import ProjectSelector from '@/components/ProjectSelector';
+import FilterPanel from '@/components/FilterPanel';
+import MergeRequestList from '@/components/MergeRequestList';
+import { GitLabService } from '@/services/gitlab';
+import { GitLabProject, GitLabMergeRequest, FilterOptions } from '@/types/gitlab';
+import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
+
+export default function HomeContent() {
+  const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
+  const [service, setService] = useState<GitLabService | null>(null);
+  const [selectedProject, setSelectedProject] = useState<GitLabProject | null>(null);
+  const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
+
+  // Initialize search params on client side only
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setSearchParams(new URLSearchParams(window.location.search));
+    }
+  }, []);
+
+  const loadAllMergeRequests = useCallback(async (currentFilters: FilterOptions) => {
+    if (!service) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const mrs = await service.getAllMergeRequests(currentFilters);
+      setMergeRequests(mrs);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load merge requests';
+      setError(errorMessage);
+      setMergeRequests([]);
+      
+      // If it's a timeout error, suggest alternatives
+      if (errorMessage.includes('timed out') || errorMessage.includes('Unable to load')) {
+        setError(
+          errorMessage + 
+          '\n\nTips to resolve this:\n' +
+          '• Select a specific project from the dropdown above for faster loading\n' +
+          '• Use author filters to search for specific people\'s merge requests\n' +
+          '• Your GitLab instance has many projects - try narrowing your search'
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [service]);
+
+  const loadMergeRequests = useCallback(async (project: GitLabProject, currentFilters: FilterOptions) => {
+    if (!service) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const mrs = await service.getMergeRequests(project.id, currentFilters);
+      setMergeRequests(mrs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load merge requests');
+      setMergeRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [service]);
+
+  // Initialize filters from URL on mount and load all MRs
+  useEffect(() => {
+    if (!searchParams) return; // Wait for client-side initialization
+    
+    const { filters: urlFilters, projectId } = decodeFiltersFromURL(searchParams);
+    setFilters(urlFilters);
+    setUrlProjectId(projectId);
+    
+    // Expand filters if any non-default filters are set
+    const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
+      urlFilters.authors?.length || 
+      urlFilters.assignee || 
+      urlFilters.reviewer || 
+      urlFilters.labels?.length || 
+      urlFilters.sourceBranch || 
+      urlFilters.targetBranch || 
+      urlFilters.title || 
+      urlFilters.draft !== undefined || 
+      urlFilters.dateFrom || 
+      urlFilters.dateTo ||
+      urlFilters.projects?.length;
+    
+    if (hasNonDefaultFilters) {
+      setFiltersExpanded(true);
+    }
+
+    // Load all MRs when service is available and no specific project is selected
+    if (service && !projectId) {
+      loadAllMergeRequests(urlFilters);
+    }
+  }, [searchParams, service, loadAllMergeRequests]);
+
+  // Auto-select project from URL when service is available
+  useEffect(() => {
+    if (service && urlProjectId && !selectedProject) {
+      // Try to load the project from the URL
+      service.getProjects().then(projects => {
+        const project = projects.find(p => p.id === urlProjectId);
+        if (project) {
+          setSelectedProject(project);
+          loadMergeRequests(project, filters);
+        }
+      }).catch(() => {
+        console.warn('Failed to load project from URL');
+      });
+    } else if (service && !urlProjectId) {
+      // Just load all MRs when no specific project is selected
+      // We don't need to store all projects in state
+    }
+  }, [service, urlProjectId, selectedProject, filters, loadMergeRequests]);
+
+  const handleProjectSelect = (project: GitLabProject | null) => {
+    setSelectedProject(project);
+    if (project) {
+      updateURL(filters, project.id);
+      loadMergeRequests(project, filters);
+    } else {
+      updateURL(filters, undefined);
+      loadAllMergeRequests(filters);
+    }
+  };
+
+  const handleFiltersChange = (newFilters: FilterOptions) => {
+    setFilters(newFilters);
+    updateURL(newFilters, selectedProject?.id);
+    if (selectedProject) {
+      loadMergeRequests(selectedProject, newFilters);
+    } else {
+      loadAllMergeRequests(newFilters);
+    }
+  };
+
+  const handleRefresh = () => {
+    if (selectedProject) {
+      loadMergeRequests(selectedProject, filters);
+    } else {
+      loadAllMergeRequests(filters);
+    }
+  };
+
+  const handleShareURL = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      // You could add a toast notification here
+      alert('URL copied to clipboard!');
+    } catch {
+      // Fallback for browsers that don't support clipboard API
+      alert(`Share this URL: ${window.location.href}`);
+    }
+  };
+
+  const handleDisconnect = () => {
+    setService(null);
+    setSelectedProject(null);
+    setMergeRequests([]);
+    setError(null);
+    setUrlProjectId(undefined);
+    setFilters({ state: 'opened' });
+    
+    // Clear URL parameters
+    const url = new URL(window.location.href);
+    url.search = '';
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  if (!service) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+              GitLab MR Viewer
+            </h1>
+            <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+              A lightweight, client-side web app for advanced filtering and viewing of GitLab merge requests. 
+              Filter by multiple authors, share URLs with your team, and keep your API token secure in your browser.
+            </p>
+          </div>
+          <ConfigForm onConfigured={setService} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            GitLab MR Viewer
+          </h1>
+          <div className="flex items-center space-x-4">
+            {selectedProject && (
+              <>
+                <button
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button
+                  onClick={handleShareURL}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                >
+                  Share URL
+                </button>
+              </>
+            )}
+            <button
+              onClick={handleDisconnect}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            >
+              Disconnect
+            </button>
+          </div>
+        </div>
+
+        {/* Project Selector */}
+        <div className="mb-6">
+          <ProjectSelector
+            service={service}
+            selectedProject={selectedProject}
+            onProjectSelect={handleProjectSelect}
+          />
+        </div>
+
+        {/* Filters */}
+        {service && (
+          <div className="mb-6">
+            <FilterPanel
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              isExpanded={filtersExpanded}
+              onToggle={() => setFiltersExpanded(!filtersExpanded)}
+              service={service}
+            />
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 rounded-md">
+            <div className="whitespace-pre-line">{error}</div>
+          </div>
+        )}
+
+        {/* Results Summary */}
+        {!loading && !error && (
+          <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+            {selectedProject ? (
+              <>
+                Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
+                {' '}in <strong>{selectedProject.path_with_namespace}</strong>
+                {filters.authors && filters.authors.length > 0 && (
+                  <span> by {filters.authors.join(', ')}</span>
+                )}
+              </>
+            ) : (
+              <>
+                {(() => {
+                  const hasSpecificFilters = filters.authors?.length || 
+                                            filters.assignee || 
+                                            filters.reviewer || 
+                                            filters.labels?.length || 
+                                            filters.sourceBranch || 
+                                            filters.targetBranch || 
+                                            filters.title ||
+                                            filters.dateFrom || 
+                                            filters.dateTo;
+                  
+                  if (!hasSpecificFilters) {
+                    return (
+                      <>
+                        Showing {mergeRequests.length} most recent merge requests across all projects.
+                        <br />
+                        <span className="text-blue-600 dark:text-blue-400 font-medium">
+                          💡 Use the filters below (especially author names) to search for more merge requests.
+                        </span>
+                      </>
+                    );
+                  } else {
+                    return (
+                      <>
+                        Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects
+                        {filters.authors && filters.authors.length > 0 && (
+                          <span> by {filters.authors.join(', ')}</span>
+                        )}
+                      </>
+                    );
+                  }
+                })()}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Merge Requests List */}
+        <MergeRequestList 
+          mergeRequests={mergeRequests} 
+          loading={loading} 
+          showProjectInfo={!selectedProject}
+          loadingMessage={!selectedProject ? 
+            ((() => {
+              const hasSpecificFilters = filters.authors?.length || 
+                                        filters.assignee || 
+                                        filters.reviewer || 
+                                        filters.labels?.length || 
+                                        filters.sourceBranch || 
+                                        filters.targetBranch || 
+                                        filters.title ||
+                                        filters.dateFrom || 
+                                        filters.dateTo;
+              
+              return hasSpecificFilters ? 
+                "Searching merge requests across all projects..." : 
+                "Loading 5 most recent merge requests from all projects...";
+            })()) : 
+            undefined
+          }
+        />
+
+        {/* Instructions when no MRs and not loading */}
+        {!loading && mergeRequests.length === 0 && !error && (
+          <div className="text-center py-12">
+            <div className="text-gray-500 dark:text-gray-400 text-lg mb-2">
+              {selectedProject ? 'No merge requests found in this project' : 'No merge requests found'}
+            </div>
+            <div className="text-gray-400 dark:text-gray-500 text-sm">
+              {selectedProject 
+                ? 'Try adjusting your filters or select a different project'
+                : 'Try adjusting your filters or select a specific project'
+              }
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
