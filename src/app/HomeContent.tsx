@@ -8,6 +8,7 @@ import MergeRequestList from '@/components/MergeRequestList';
 import { GitLabService } from '@/services/gitlab';
 import { GitLabProject, GitLabMergeRequest, FilterOptions } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
+import { loadUIState, saveUIState } from '@/utils/uiState';
 
 export default function HomeContent() {
   const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
@@ -19,6 +20,16 @@ export default function HomeContent() {
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
+
+  // Initialize UI state from localStorage first
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedUIState = loadUIState();
+      if (savedUIState.filtersExpanded !== undefined) {
+        setFiltersExpanded(savedUIState.filtersExpanded);
+      }
+    }
+  }, []);
 
   // Initialize search params on client side only
   useEffect(() => {
@@ -81,7 +92,7 @@ export default function HomeContent() {
     setFilters(urlFilters);
     setUrlProjectId(projectId);
     
-    // Expand filters if any non-default filters are set
+    // Only auto-expand filters if there are non-default filters AND user hasn't saved a preference
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
       urlFilters.authors?.length || 
       urlFilters.assignee || 
@@ -95,8 +106,11 @@ export default function HomeContent() {
       urlFilters.dateTo ||
       urlFilters.projects?.length;
     
-    if (hasNonDefaultFilters) {
+    // Only auto-expand if user hasn't explicitly saved a preference
+    const savedUIState = loadUIState();
+    if (hasNonDefaultFilters && savedUIState.filtersExpanded === undefined) {
       setFiltersExpanded(true);
+      saveUIState({ filtersExpanded: true });
     }
 
     // Load all MRs when service is available and no specific project is selected
@@ -143,6 +157,12 @@ export default function HomeContent() {
     } else {
       loadAllMergeRequests(newFilters);
     }
+  };
+
+  const handleFiltersToggle = () => {
+    const newExpanded = !filtersExpanded;
+    setFiltersExpanded(newExpanded);
+    saveUIState({ filtersExpanded: newExpanded });
   };
 
   const handleRefresh = () => {
@@ -248,7 +268,7 @@ export default function HomeContent() {
               filters={filters}
               onFiltersChange={handleFiltersChange}
               isExpanded={filtersExpanded}
-              onToggle={() => setFiltersExpanded(!filtersExpanded)}
+              onToggle={handleFiltersToggle}
               service={service}
             />
           </div>

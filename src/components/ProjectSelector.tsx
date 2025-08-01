@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { GitLabProject } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
+import { loadUIState, saveUIState } from '@/utils/uiState';
 
 interface ProjectSelectorProps {
   service: GitLabService;
@@ -16,6 +17,16 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+
+  // Initialize UI state from localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedUIState = loadUIState();
+      if (savedUIState.projectSelectorOpen !== undefined) {
+        setIsOpen(savedUIState.projectSelectorOpen);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const loadInitialProjects = async () => {
@@ -58,10 +69,35 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
     }
   };
 
+  const handleToggleOpen = () => {
+    const newIsOpen = !isOpen;
+    setIsOpen(newIsOpen);
+    saveUIState({ projectSelectorOpen: newIsOpen });
+  };
+
   const handleProjectSelect = (project: GitLabProject | null) => {
     onProjectSelect(project);
     setIsOpen(false);
+    saveUIState({ projectSelectorOpen: false });
   };
+
+  useEffect(() => {
+    const loadInitialProjects = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const projectList = await service.getProjects();
+        setProjects(projectList);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load projects');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadInitialProjects();
+  }, [service]);
 
   return (
     <div className="relative">
@@ -71,7 +107,7 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
         </label>
         
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={handleToggleOpen}
           className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <span className="text-gray-900 dark:text-white">
