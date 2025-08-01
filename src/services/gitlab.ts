@@ -3,6 +3,8 @@ import { GitLabProject, GitLabMergeRequest, GitLabUser, GitLabGroup, FilterOptio
 export class GitLabService {
   private baseUrl: string;
   private token: string;
+  private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
+  private readonly CACHE_KEY = 'gitlab-project-cache';
 
   constructor(instanceUrl: string, token: string) {
     this.baseUrl = instanceUrl.endsWith('/') ? instanceUrl.slice(0, -1) : instanceUrl;
@@ -20,6 +22,8 @@ export class GitLabService {
         headers: {
           'Authorization': `Bearer ${this.token}`,
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
         },
         signal: controller.signal,
       });
@@ -40,6 +44,137 @@ export class GitLabService {
     }
   }
 
+  private async enrichMergeRequestsWithProjects(mergeRequests: GitLabMergeRequest[]): Promise<GitLabMergeRequest[]> {
+    // Get unique project IDs
+    const projectIds = [...new Set(mergeRequests.map(mr => mr.project_id))];
+    
+    // Load cache from localStorage
+    const cache = this.loadProjectCache();
+    const projectsMap = new Map<number, { id: number; name: string; path_with_namespace: string; web_url: string; }>();
+    const projectsToFetch: number[] = [];
+    const now = Date.now();
+    
+    for (const projectId of projectIds) {
+      const cached = cache[projectId];
+      if (cached && (now - cached.timestamp) < this.CACHE_DURATION) {
+        // Use cached data
+        projectsMap.set(projectId, cached.project);
+      } else {
+        // Need to fetch from API
+        projectsToFetch.push(projectId);
+      }
+    }
+    
+    console.log(`Project cache: ${projectIds.length - projectsToFetch.length} cached, ${projectsToFetch.length} to fetch`);
+    
+    // Fetch projects that aren't cached or are expired
+    for (const projectId of projectsToFetch.slice(0, 10)) { // Limit to first 10 projects for performance
+      try {
+        const project = await this.makeRequest<GitLabProject>(`/projects/${projectId}`, 3000);
+        
+        const projectInfo = {
+          id: project.id,
+          name: project.name,
+          path_with_namespace: project.path_with_namespace,
+          web_url: project.web_url
+        };
+        
+        // Store in current session map
+        projectsMap.set(projectId, projectInfo);
+        
+        // Update cache for future use
+        cache[projectId] = {
+          project: projectInfo,
+          timestamp: now
+        };
+      } catch (error) {
+        console.warn(`Failed to fetch project ${projectId}:`, error);
+      }
+    }
+    
+    // Save updated cache to localStorage
+    this.saveProjectCache(cache);
+    
+    // Enrich merge requests with project information
+    return mergeRequests.map(mr => ({
+      ...mr,
+      project: projectsMap.get(mr.project_id)
+    }));
+  }
+
+  private loadProjectCache(): Record<number, { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; }> {
+    try {
+      const cached = localStorage.getItem(this.CACHE_KEY);
+      if (cached) {
+        const cache = JSON.parse(cached);
+        // Clean up expired entries
+        const now = Date.now();
+        const cleanedCache: Record<number, { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; }> = {};
+        let removedCount = 0;
+        
+        for (const [id, entry] of Object.entries(cache)) {
+          const typedEntry = entry as { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; };
+          if (now - typedEntry.timestamp < this.CACHE_DURATION) {
+            cleanedCache[parseInt(id)] = typedEntry;
+          } else {
+            removedCount++;
+          }
+        }
+        
+        if (removedCount > 0) {
+          console.log(`Cleaned up ${removedCount} expired cache entries`);
+          this.saveProjectCache(cleanedCache);
+        }
+        
+        return cleanedCache;
+      }
+    } catch (error) {
+      console.warn('Failed to load project cache from localStorage:', error);
+    }
+    return {};
+  }
+
+  private saveProjectCache(cache: Record<number, { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; }>): void {
+    try {
+      localStorage.setItem(this.CACHE_KEY, JSON.stringify(cache));
+    } catch (error) {
+      console.warn('Failed to save project cache to localStorage:', error);
+    }
+  }
+
+  // Method to clear project cache if needed
+  clearProjectCache(): void {
+    try {
+      const cache = this.loadProjectCache();
+      const cacheSize = Object.keys(cache).length;
+      console.log(`Clearing project cache (${cacheSize} entries)`);
+      localStorage.removeItem(this.CACHE_KEY);
+    } catch (error) {
+      console.warn('Failed to clear project cache:', error);
+    }
+  }
+
+  // Method to get cache status (useful for debugging)
+  getProjectCacheStatus(): { size: number; entries: Array<{ id: number; name: string; age: string }> } {
+    try {
+      const cache = this.loadProjectCache();
+      const now = Date.now();
+      const entries = Object.entries(cache).map(([id, cached]) => ({
+        id: parseInt(id),
+        name: cached.project.name,
+        age: `${Math.round((now - cached.timestamp) / 1000 / 60)}m ago`
+      }));
+      
+      return {
+        size: Object.keys(cache).length,
+        entries
+      };
+    } catch (error) {
+      console.warn('Failed to get cache status:', error);
+      return { size: 0, entries: [] };
+    }
+  }
+
   async getProjects(search?: string): Promise<GitLabProject[]> {
     let endpoint = '/projects?membership=true&simple=true&per_page=100';
     if (search) {
@@ -52,87 +187,15 @@ export class GitLabService {
     projectId: number,
     filters: FilterOptions = {}
   ): Promise<GitLabMergeRequest[]> {
-    // If no authors specified, get all MRs and filter client-side
-    // If authors specified, make multiple API calls for each author
-    if (filters.authors && filters.authors.length > 0) {
-      // Get MRs for each author and combine results
-      const allMergeRequests: GitLabMergeRequest[] = [];
-      
-      for (const author of filters.authors) {
-        const params = new URLSearchParams();
-        
-        if (filters.state && filters.state !== 'all') {
-          params.append('state', filters.state);
-        }
-        
-        params.append('author_username', author);
-        
-        if (filters.assignee) {
-          params.append('assignee_username', filters.assignee);
-        }
-        
-        if (filters.reviewer) {
-          params.append('reviewer_username', filters.reviewer);
-        }
-        
-        if (filters.labels && filters.labels.length > 0) {
-          params.append('labels', filters.labels.join(','));
-        }
-        
-        if (filters.sourceBranch) {
-          params.append('source_branch', filters.sourceBranch);
-        }
-        
-        if (filters.targetBranch) {
-          params.append('target_branch', filters.targetBranch);
-        }
-        
-        if (filters.dateFrom) {
-          params.append('created_after', filters.dateFrom);
-        }
-        
-        if (filters.dateTo) {
-          params.append('created_before', filters.dateTo);
-        }
-
-        params.append('per_page', '100');
-        params.append('order_by', 'updated_at');
-        params.append('sort', 'desc');
-
-        const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
-        
-        try {
-          const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint);
-          allMergeRequests.push(...authorMRs);
-        } catch (error) {
-          // Continue with other authors if one fails
-          console.warn(`Failed to fetch MRs for author ${author}:`, error);
-        }
-      }
-      
-      // Remove duplicates based on MR ID
-      const uniqueMRs = allMergeRequests.filter((mr, index, self) => 
-        index === self.findIndex(m => m.id === mr.id)
-      );
-      
-      // Apply client-side filters
-      return uniqueMRs.filter(mr => {
-        if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
-          return false;
-        }
-        
-        if (filters.draft !== undefined && mr.draft !== filters.draft) {
-          return false;
-        }
-        
-        return true;
-      });
-    } else {
-      // Original logic for non-author filtering
+    const buildParams = (authorUsername?: string): URLSearchParams => {
       const params = new URLSearchParams();
       
       if (filters.state && filters.state !== 'all') {
         params.append('state', filters.state);
+      }
+      
+      if (authorUsername) {
+        params.append('author_username', authorUsername);
       }
       
       if (filters.assignee) {
@@ -166,66 +229,121 @@ export class GitLabService {
       params.append('per_page', '100');
       params.append('order_by', 'updated_at');
       params.append('sort', 'desc');
-
-      const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
-      const mergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint);
       
-      // Client-side filtering for title and draft status
-      return mergeRequests.filter(mr => {
-        if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
-          return false;
-        }
+      return params;
+    };
+
+    let allMergeRequests: GitLabMergeRequest[] = [];
+
+    // If authors specified, make multiple API calls for each author
+    if (filters.authors && filters.authors.length > 0) {
+      for (const author of filters.authors) {
+        const params = buildParams(author);
+        const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
         
-        if (filters.draft !== undefined && mr.draft !== filters.draft) {
-          return false;
+        try {
+          const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint);
+          allMergeRequests.push(...authorMRs);
+        } catch (error) {
+          console.warn(`Failed to fetch MRs for author ${author}:`, error);
         }
-        
-        return true;
-      });
+      }
+      
+      // Remove duplicates and sort only when combining multiple author results
+      allMergeRequests = allMergeRequests
+        .filter((mr, index, self) => 
+          index === self.findIndex(m => m.id === mr.id)
+        )
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    } else {
+      // Single API call - rely on GitLab's server-side sorting
+      const params = buildParams();
+      const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
+      allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint);
     }
+    
+    // Enrich merge requests with project information
+    allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
+    
+    // Apply client-side filters only
+    return allMergeRequests.filter(mr => {
+      if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
+        return false;
+      }
+      
+      if (filters.draft !== undefined && mr.draft !== filters.draft) {
+        return false;
+      }
+      
+      return true;
+    });
   }
 
   async getAllMergeRequests(filters: FilterOptions = {}): Promise<GitLabMergeRequest[]> {
-    // Get merge requests from all accessible projects
-    const params = new URLSearchParams();
-    
-    if (filters.state && filters.state !== 'all') {
-      params.append('state', filters.state);
-    }
-    
-    if (filters.assignee) {
-      params.append('assignee_username', filters.assignee);
-    }
-    
-    if (filters.reviewer) {
-      params.append('reviewer_username', filters.reviewer);
-    }
-    
-    if (filters.labels && filters.labels.length > 0) {
-      params.append('labels', filters.labels.join(','));
-    }
-    
-    if (filters.sourceBranch) {
-      params.append('source_branch', filters.sourceBranch);
-    }
-    
-    if (filters.targetBranch) {
-      params.append('target_branch', filters.targetBranch);
-    }
-    
-    if (filters.dateFrom) {
-      params.append('created_after', filters.dateFrom);
-    }
-    
-    if (filters.dateTo) {
-      params.append('created_before', filters.dateTo);
-    }
+    const buildParams = (authorUsername?: string): URLSearchParams => {
+      const params = new URLSearchParams();
+      
+      if (filters.state && filters.state !== 'all') {
+        params.append('state', filters.state);
+      }
+      
+      if (authorUsername) {
+        params.append('author_username', authorUsername);
+      }
+      
+      if (filters.assignee) {
+        params.append('assignee_username', filters.assignee);
+      }
+      
+      if (filters.reviewer) {
+        params.append('reviewer_username', filters.reviewer);
+      }
+      
+      if (filters.labels && filters.labels.length > 0) {
+        params.append('labels', filters.labels.join(','));
+      }
+      
+      if (filters.sourceBranch) {
+        params.append('source_branch', filters.sourceBranch);
+      }
+      
+      if (filters.targetBranch) {
+        params.append('target_branch', filters.targetBranch);
+      }
+      
+      if (filters.dateFrom) {
+        params.append('created_after', filters.dateFrom);
+      }
+      
+      if (filters.dateTo) {
+        params.append('created_before', filters.dateTo);
+      }
 
-    params.append('scope', 'all');
-    params.append('order_by', 'updated_at');
-    params.append('sort', 'desc');
+      params.append('scope', 'all');
+      params.append('order_by', 'updated_at');
+      params.append('sort', 'desc');
 
-    // Determine page size based on whether filters are applied
+      // Determine page size based on whether filters are applied
+      const hasSpecificFilters = filters.authors?.length || 
+                                filters.assignee || 
+                                filters.reviewer || 
+                                filters.labels?.length || 
+                                filters.sourceBranch || 
+                                filters.targetBranch || 
+                                filters.title ||
+                                filters.dateFrom || 
+                                filters.dateTo;
+
+      // Conservative loading: fewer results if no specific filters
+      const pageSize = hasSpecificFilters ? '20' : '3';
+      params.append('per_page', pageSize);
+      
+      return params;
+    };
+
+    let allMergeRequests: GitLabMergeRequest[] = [];
+
+    // Determine timeout based on filters
     const hasSpecificFilters = filters.authors?.length || 
                               filters.assignee || 
                               filters.reviewer || 
@@ -236,24 +354,14 @@ export class GitLabService {
                               filters.dateFrom || 
                               filters.dateTo;
 
-    // If no specific filters, load only 3 most recent MRs (very conservative for speed)
-    // If filters are applied, allow more results (up to 20)
-    const pageSize = hasSpecificFilters ? '20' : '3';
-    params.append('per_page', pageSize);
-
-    let allMergeRequests: GitLabMergeRequest[] = [];
-
     try {
-      // If authors are specified, make multiple API calls
+      // If authors specified, make multiple API calls for each author
       if (filters.authors && filters.authors.length > 0) {
         for (const author of filters.authors) {
-          const authorParams = new URLSearchParams(params);
-          authorParams.append('author_username', author);
-          
-          const endpoint = `/merge_requests?${authorParams.toString()}`;
+          const params = buildParams(author);
+          const endpoint = `/merge_requests?${params.toString()}`;
           
           try {
-            // Use shorter timeout for author-specific requests
             const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 5000);
             allMergeRequests.push(...authorMRs);
           } catch (error) {
@@ -261,14 +369,15 @@ export class GitLabService {
           }
         }
         
-        // Remove duplicates based on MR ID
-        allMergeRequests = allMergeRequests.filter((mr, index, self) => 
-          index === self.findIndex(m => m.id === mr.id)
-        );
+        // Remove duplicates and sort only when combining multiple author results
+        allMergeRequests = allMergeRequests
+          .filter((mr, index, self) => 
+            index === self.findIndex(m => m.id === mr.id)
+          );
       } else {
-        // Get merge requests without author filtering
+        // Single API call - rely on GitLab's server-side sorting
+        const params = buildParams();
         const endpoint = `/merge_requests?${params.toString()}`;
-        // Use shorter timeouts: very short for initial load, moderate for filtered requests
         const timeout = hasSpecificFilters ? 10000 : 3000;
         allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, timeout);
       }
@@ -280,8 +389,13 @@ export class GitLabService {
       }
     }
     
-    // Apply client-side filters
-    return allMergeRequests.filter(mr => {
+    // Enrich merge requests with project information
+    allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
+    
+    // Apply client-side filters only
+    return allMergeRequests
+          .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+          .filter(mr => {
       if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
         return false;
       }

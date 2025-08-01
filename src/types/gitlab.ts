@@ -36,6 +36,12 @@ export interface GitLabMergeRequest {
   target_branch: string;
   web_url: string;
   project_id: number;
+  project?: {
+    id: number;
+    name: string;
+    path_with_namespace: string;
+    web_url: string;
+  };
   labels: string[];
   draft: boolean;
   work_in_progress: boolean;

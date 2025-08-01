@@ -120,11 +120,23 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                 <span>#{mr.iid}</span>
                 {showProjectInfo && (
                   <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs">
-                    Project #{mr.project_id}
+                    {mr.project?.web_url ? (
+                      <a
+                        href={mr.project.web_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                      >
+                        {mr.project.name}
+                      </a>
+                    ) : (
+                      mr.project?.name || `Project #${mr.project_id}`
+                    )}
                   </span>
                 )}
                 <span>by {mr.author.name}</span>
-                <span>{formatDate(mr.created_at)}</span>
+                <span>created {formatDate(mr.created_at)}</span>
+                <span>updated {formatDate(mr.updated_at)}</span>
                 {mr.pipeline && (
                   <div className="flex items-center space-x-1">
                     <div className={`w-2 h-2 rounded-full ${getPipelineColor(mr.pipeline.status) === 'text-green-600 dark:text-green-400' ? 'bg-green-500' : 
