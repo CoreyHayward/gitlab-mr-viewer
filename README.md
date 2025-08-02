@@ -1,5 +1,7 @@
 # GitLab MR Viewer
 
+A note: This project was created as an experiment with agentic code tools to explore and test the current state of agent mode and AI-assisted development.
+
 A lightweight, client-side web app for advanced filtering and viewing of GitLab merge requests. Built with Next.js and designed with privacy in mind - your API token never leaves your browser.
 
 ## Features
