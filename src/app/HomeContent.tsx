@@ -220,6 +220,8 @@ export default function HomeContent() {
     setError(null);
     setUrlProjectId(undefined);
     setFilters({ state: 'opened' });
+    localStorage.removeItem('gitlab-instance-url');
+    localStorage.removeItem('gitlab-token');
     
     // Clear URL parameters
     const url = new URL(window.location.href);
