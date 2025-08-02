@@ -16,7 +16,8 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      hour12: false
     });
   };
 
@@ -219,7 +220,8 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                     </span>
                   )}
                   <span>by <span className="font-medium text-gray-700 dark:text-gray-300">{mr.author.name}</span></span>
-                  <span>{formatDate(mr.created_at)}</span>
+                  <span>created {formatDate(mr.created_at)}</span>
+                  <span>updated {formatDate(mr.updated_at)}</span>
                 </div>
               </div>
               
