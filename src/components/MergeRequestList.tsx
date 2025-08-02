@@ -127,7 +127,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
           </div>
         )}
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm">
+          <div key={i} className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
             <div className="p-6 animate-pulse">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1 space-y-3">
@@ -179,7 +179,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       {mergeRequests.map((mr) => (
         <div
           key={mr.id}
-          className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-200 overflow-hidden group"
+          className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-slate-600 transition-all duration-200 overflow-hidden group"
         >
           {/* Header */}
           <div className="p-4">

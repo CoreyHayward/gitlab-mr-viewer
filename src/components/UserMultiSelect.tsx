@@ -89,11 +89,11 @@ export default function UserMultiSelect({
       <div className="relative" ref={dropdownRef}>
         {/* Selected users display */}
         {selectedUsers.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800">
+          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-slate-50 dark:bg-slate-900/10 rounded-lg border border-slate-200 dark:border-slate-800">
             {selectedUserObjects.map(user => (
               <span
                 key={user.username}
-                className="inline-flex items-center px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-sm rounded-full border border-blue-200 dark:border-blue-700"
+                className="inline-flex items-center px-3 py-1.5 bg-slate-100 dark:bg-slate-900/30 text-slate-800 dark:text-slate-200 text-sm rounded-full border border-slate-200 dark:border-slate-700"
               >
                 <Image
                   src={user.avatar_url}
@@ -103,10 +103,10 @@ export default function UserMultiSelect({
                   className="rounded-full mr-2"
                 />
                 <span className="font-medium">{user.name}</span>
-                <span className="text-blue-600 dark:text-blue-400 ml-1">@{user.username}</span>
+                <span className="text-violet-600 dark:text-violet-400 ml-1">@{user.username}</span>
                 <button
                   onClick={() => handleRemoveUser(user.username)}
-                  className="ml-2 p-0.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800 rounded-full transition-colors"
+                  className="ml-2 p-0.5 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"
                 >
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -149,7 +149,7 @@ export default function UserMultiSelect({
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => setIsOpen(true)}
             placeholder={placeholder}
-            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-slate-500"
           />
           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
             <svg
@@ -165,7 +165,7 @@ export default function UserMultiSelect({
 
         {/* Dropdown */}
         {isOpen && (
-          <div className="absolute z-50 w-full mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+          <div className="absolute z-50 w-full mt-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-xl max-h-64 overflow-y-auto">
             {loading ? (
               <div className="p-4 text-center">
                 <div className="inline-flex items-center space-x-2 text-gray-500 dark:text-gray-400">
@@ -205,7 +205,7 @@ export default function UserMultiSelect({
                   <button
                     key={user.id}
                     onClick={() => handleUserToggle(user.username)}
-                    className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 focus:outline-none focus:bg-blue-50 dark:focus:bg-blue-900/20 transition-colors group"
+                    className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-900/20 transition-colors group"
                   >
                     <div className="flex items-center space-x-3">
                       <div className="relative">
@@ -214,20 +214,20 @@ export default function UserMultiSelect({
                           alt={user.name}
                           width={36}
                           height={36}
-                          className="rounded-full border-2 border-gray-200 dark:border-gray-600 group-hover:border-blue-200 dark:group-hover:border-blue-700 transition-colors"
+                          className="rounded-full border-2 border-gray-200 dark:border-gray-600 group-hover:border-slate-200 dark:group-hover:border-slate-700 transition-colors"
                         />
                         <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-400 border-2 border-white dark:border-gray-800 rounded-full"></div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900 dark:text-white group-hover:text-blue-900 dark:group-hover:text-blue-100 transition-colors">
+                        <div className="font-medium text-gray-900 dark:text-white group-hover:text-slate-900 dark:group-hover:text-slate-100 transition-colors">
                           {user.name}
                         </div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-colors">
+                        <div className="text-sm text-gray-500 dark:text-gray-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
                           @{user.username}
                         </div>
                       </div>
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                        <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                         </svg>
                       </div>

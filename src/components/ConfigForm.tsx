@@ -71,7 +71,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+    <div className="max-w-md mx-auto mt-8 p-6 bg-white dark:bg-slate-800 rounded-lg shadow-lg">
       <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
         GitLab Configuration
       </h2>
@@ -86,7 +86,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             id="instanceUrl"
             value={instanceUrl}
             onChange={(e) => setInstanceUrl(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-slate-700 dark:text-white"
             placeholder="https://gitlab.com"
             required
           />
@@ -101,14 +101,14 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             id="token"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-slate-700 dark:text-white"
             placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
             required
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Create a token at: Settings → Access Tokens → Personal Access Tokens
             <br />
-            Required scopes: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">api</code>, <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">read_user</code>
+            Required scopes: <code className="bg-gray-100 dark:bg-slate-700 px-1 rounded">api</code>, <code className="bg-gray-100 dark:bg-slate-700 px-1 rounded">read_user</code>
           </p>
         </div>
 
@@ -118,7 +118,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             id="rememberMe"
             checked={rememberMe}
             onChange={(e) => setRememberMe(e.target.checked)}
-            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
           />
           <label htmlFor="rememberMe" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
             Remember my credentials (stored securely in browser)
@@ -134,17 +134,17 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
         <button
           type="submit"
           disabled={isValidating}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2 px-4 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-medium py-2 px-4 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
         >
           {isValidating ? 'Validating...' : 'Connect to GitLab'}
         </button>
       </form>
 
-      <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-        <h3 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">
+      <div className="mt-6 p-4 bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800 rounded-md">
+        <h3 className="text-sm font-medium text-slate-800 dark:text-slate-300 mb-2">
           🔒 Privacy & Security
         </h3>
-        <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
+        <ul className="text-xs text-slate-700 dark:text-slate-400 space-y-1">
           <li>• Your token is stored only in your browser (memory or local storage if you choose)</li>
           <li>• All API calls are made directly from your browser to GitLab</li>
           <li>• No data is sent to or stored on our servers</li>

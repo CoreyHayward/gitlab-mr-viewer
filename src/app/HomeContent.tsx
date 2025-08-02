@@ -221,7 +221,7 @@ export default function HomeContent() {
 
   if (!service) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
         <div className="container mx-auto px-4 py-8">
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
@@ -239,7 +239,7 @@ export default function HomeContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -252,7 +252,7 @@ export default function HomeContent() {
                 <button
                   onClick={handleRefresh}
                   disabled={loading}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
                 >
                   {loading ? 'Refreshing...' : 'Refresh'}
                 </button>
@@ -326,7 +326,7 @@ export default function HomeContent() {
                       <>
                         Showing {mergeRequests.length} of your recent merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects.
                         <br />
-                        <span className="text-blue-600 dark:text-blue-400 font-medium">
+                        <span className="text-violet-600 dark:text-violet-400 font-medium">
                           💡 Use the filters above to search for more merge requests.
                         </span>
                       </>

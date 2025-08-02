@@ -40,14 +40,14 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
   }).length;
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+    <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
       <div className="p-6">
-        <button
-          onClick={onToggle}
-          className="flex items-center justify-between w-full text-left group hover:bg-gray-50 dark:hover:bg-gray-700/50 -m-2 p-2 rounded-lg transition-colors"
-        >
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-sm">
+        <div className="flex items-center justify-between w-full">
+          <button
+            onClick={onToggle}
+            className="flex items-center space-x-3 text-left group hover:bg-gray-50 dark:hover:bg-gray-700/50 -m-2 p-2 rounded-lg transition-colors flex-1"
+          >
+            <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-lg shadow-sm">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.414A1 1 0 013 6.707V4z" />
               </svg>
@@ -58,7 +58,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                   Advanced Filters
                 </h3>
                 {activeFiltersCount > 0 && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200">
                     {activeFiltersCount} active
                   </span>
                 )}
@@ -67,29 +67,31 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                 Refine your search across all projects
               </p>
             </div>
-          </div>
-          <div className="flex items-center space-x-2">
+          </button>
+          <div className="flex items-center space-x-2 ml-2">
             {activeFiltersCount > 0 && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  clearFilters();
-                }}
-                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                onClick={clearFilters}
+                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-slate-600 transition-colors"
               >
                 Clear all
               </button>
             )}
-            <svg
-              className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+            <button
+              onClick={onToggle}
+              className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-slate-600 transition-colors"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+              <svg
+                className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
           </div>
-        </button>
+        </div>
       </div>
 
       {isExpanded && (
@@ -110,7 +112,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                     <select
                       value={localFilters.state || 'all'}
                       onChange={(e) => handleFilterChange('state', e.target.value as 'opened' | 'closed' | 'merged' | 'all')}
-                      className="w-full px-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white transition-all duration-200 appearance-none cursor-pointer hover:border-gray-400 dark:hover:border-gray-500"
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 appearance-none cursor-pointer hover:border-gray-400 dark:hover:border-slate-500"
                     >
                       <option value="all">All States</option>
                       <option value="opened">🟢 Open</option>
@@ -160,7 +162,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                       value={localFilters.title || ''}
                       onChange={(e) => handleFilterChange('title', e.target.value || undefined)}
                       placeholder="Search merge request titles..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-slate-500"
                     />
                   </div>
                 </div>
@@ -182,7 +184,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                       value={localFilters.projects?.join(', ') || ''}
                       onChange={(e) => handleProjectsChange(e.target.value)}
                       placeholder="project1, group/project2, ..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-slate-500"
                     />
                   </div>
                 </div>
@@ -210,7 +212,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                       type="date"
                       value={localFilters.dateFrom || ''}
                       onChange={(e) => handleFilterChange('dateFrom', e.target.value || undefined)}
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 hover:border-gray-400 dark:hover:border-slate-500"
                     />
                   </div>
                 </div>
@@ -230,7 +232,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                       type="date"
                       value={localFilters.dateTo || ''}
                       onChange={(e) => handleFilterChange('dateTo', e.target.value || undefined)}
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 hover:border-gray-400 dark:hover:border-slate-500"
                     />
                   </div>
                 </div>
