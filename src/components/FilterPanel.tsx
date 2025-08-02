@@ -22,11 +22,6 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
     onFiltersChange(newFilters);
   };
 
-  const handleLabelsChange = (value: string) => {
-    const labels = value.split(',').map(l => l.trim()).filter(l => l.length > 0);
-    handleFilterChange('labels', labels.length > 0 ? labels : undefined);
-  };
-
   const handleProjectsChange = (value: string) => {
     const projects = value.split(',').map(p => p.trim()).filter(p => p.length > 0);
     handleFilterChange('projects', projects.length > 0 ? projects : undefined);
@@ -90,58 +85,6 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
               placeholder="Search and select authors..."
               label="Authors"
             />
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Assignee
-              </label>
-              <input
-                type="text"
-                value={localFilters.assignee || ''}
-                onChange={(e) => handleFilterChange('assignee', e.target.value || undefined)}
-                placeholder="Username"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Reviewer
-              </label>
-              <input
-                type="text"
-                value={localFilters.reviewer || ''}
-                onChange={(e) => handleFilterChange('reviewer', e.target.value || undefined)}
-                placeholder="Username"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Source Branch
-              </label>
-              <input
-                type="text"
-                value={localFilters.sourceBranch || ''}
-                onChange={(e) => handleFilterChange('sourceBranch', e.target.value || undefined)}
-                placeholder="Branch name"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Target Branch
-              </label>
-              <input
-                type="text"
-                value={localFilters.targetBranch || ''}
-                onChange={(e) => handleFilterChange('targetBranch', e.target.value || undefined)}
-                placeholder="Branch name"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -154,19 +97,6 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                 value={localFilters.title || ''}
                 onChange={(e) => handleFilterChange('title', e.target.value || undefined)}
                 placeholder="Search in title"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Labels
-              </label>
-              <input
-                type="text"
-                value={localFilters.labels?.join(', ') || ''}
-                onChange={(e) => handleLabelsChange(e.target.value)}
-                placeholder="label1, label2, label3"
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm"
               />
             </div>

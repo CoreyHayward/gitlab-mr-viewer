@@ -66,11 +66,6 @@ export interface GitLabMergeRequest {
 export interface FilterOptions {
   state?: 'opened' | 'closed' | 'merged' | 'all';
   authors?: string[];
-  assignee?: string;
-  reviewer?: string;
-  labels?: string[];
-  sourceBranch?: string;
-  targetBranch?: string;
   title?: string;
   draft?: boolean;
   dateFrom?: string;

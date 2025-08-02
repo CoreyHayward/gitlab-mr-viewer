@@ -195,26 +195,6 @@ export class GitLabService {
         params.append('author_username', authorUsername);
       }
       
-      if (filters.assignee) {
-        params.append('assignee_username', filters.assignee);
-      }
-      
-      if (filters.reviewer) {
-        params.append('reviewer_username', filters.reviewer);
-      }
-      
-      if (filters.labels && filters.labels.length > 0) {
-        params.append('labels', filters.labels.join(','));
-      }
-      
-      if (filters.sourceBranch) {
-        params.append('source_branch', filters.sourceBranch);
-      }
-      
-      if (filters.targetBranch) {
-        params.append('target_branch', filters.targetBranch);
-      }
-      
       if (filters.dateFrom) {
         params.append('created_after', filters.dateFrom);
       }
@@ -279,11 +259,6 @@ export class GitLabService {
   async getAllMergeRequests(filters: FilterOptions = {}): Promise<GitLabMergeRequest[]> {
     // Determine if we have specific filters early
     const hasSpecificFilters = filters.authors?.length || 
-                              filters.assignee || 
-                              filters.reviewer || 
-                              filters.labels?.length || 
-                              filters.sourceBranch || 
-                              filters.targetBranch || 
                               filters.title ||
                               filters.dateFrom || 
                               filters.dateTo;
@@ -297,26 +272,6 @@ export class GitLabService {
       
       if (authorUsername) {
         params.append('author_username', authorUsername);
-      }
-      
-      if (filters.assignee) {
-        params.append('assignee_username', filters.assignee);
-      }
-      
-      if (filters.reviewer) {
-        params.append('reviewer_username', filters.reviewer);
-      }
-      
-      if (filters.labels && filters.labels.length > 0) {
-        params.append('labels', filters.labels.join(','));
-      }
-      
-      if (filters.sourceBranch) {
-        params.append('source_branch', filters.sourceBranch);
-      }
-      
-      if (filters.targetBranch) {
-        params.append('target_branch', filters.targetBranch);
       }
       
       if (filters.dateFrom) {

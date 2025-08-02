@@ -57,11 +57,6 @@ export default function HomeContent() {
       
       // Check if this is just the initial load without specific filters
       const hasSpecificFilters = currentFilters.authors?.length || 
-                                currentFilters.assignee || 
-                                currentFilters.reviewer || 
-                                currentFilters.labels?.length || 
-                                currentFilters.sourceBranch || 
-                                currentFilters.targetBranch || 
                                 currentFilters.title ||
                                 currentFilters.dateFrom || 
                                 currentFilters.dateTo;
@@ -72,7 +67,7 @@ export default function HomeContent() {
           'Unable to load recent merge requests automatically.\n\n' +
           'This is normal for very large GitLab instances. To view merge requests:\n' +
           '• Select a specific project from the dropdown above, or\n' +
-          '• Use the filters below to search by author, labels, etc.'
+          '• Use the filters below to search by author, title, etc.'
         );
       } else {
         setError(errorMessage);
@@ -124,11 +119,6 @@ export default function HomeContent() {
     // Expand filters if any non-default filters are set
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
       urlFilters.authors?.length || 
-      urlFilters.assignee || 
-      urlFilters.reviewer || 
-      urlFilters.labels?.length || 
-      urlFilters.sourceBranch || 
-      urlFilters.targetBranch || 
       urlFilters.title || 
       urlFilters.draft !== undefined || 
       urlFilters.dateFrom || 
@@ -327,11 +317,6 @@ export default function HomeContent() {
               <>
                 {(() => {
                   const hasSpecificFilters = filters.authors?.length || 
-                                            filters.assignee || 
-                                            filters.reviewer || 
-                                            filters.labels?.length || 
-                                            filters.sourceBranch || 
-                                            filters.targetBranch || 
                                             filters.title ||
                                             filters.dateFrom || 
                                             filters.dateTo;
@@ -370,11 +355,6 @@ export default function HomeContent() {
           loadingMessage={!selectedProject ? 
             ((() => {
               const hasSpecificFilters = filters.authors?.length || 
-                                        filters.assignee || 
-                                        filters.reviewer || 
-                                        filters.labels?.length || 
-                                        filters.sourceBranch || 
-                                        filters.targetBranch || 
                                         filters.title ||
                                         filters.dateFrom || 
                                         filters.dateTo;

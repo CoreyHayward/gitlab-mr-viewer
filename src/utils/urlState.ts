@@ -15,26 +15,6 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): 
     params.set('authors', filters.authors.join(','));
   }
   
-  if (filters.assignee) {
-    params.set('assignee', filters.assignee);
-  }
-  
-  if (filters.reviewer) {
-    params.set('reviewer', filters.reviewer);
-  }
-  
-  if (filters.labels && filters.labels.length > 0) {
-    params.set('labels', filters.labels.join(','));
-  }
-  
-  if (filters.sourceBranch) {
-    params.set('sourceBranch', filters.sourceBranch);
-  }
-  
-  if (filters.targetBranch) {
-    params.set('targetBranch', filters.targetBranch);
-  }
-  
   if (filters.title) {
     params.set('title', filters.title);
   }
@@ -81,29 +61,6 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
     if (authors.length > 0) {
       filters.authors = authors;
     }
-  }
-  
-  if (searchParams.has('assignee')) {
-    filters.assignee = searchParams.get('assignee')!;
-  }
-  
-  if (searchParams.has('reviewer')) {
-    filters.reviewer = searchParams.get('reviewer')!;
-  }
-  
-  if (searchParams.has('labels')) {
-    const labels = searchParams.get('labels')!.split(',').map(l => l.trim()).filter(l => l.length > 0);
-    if (labels.length > 0) {
-      filters.labels = labels;
-    }
-  }
-  
-  if (searchParams.has('sourceBranch')) {
-    filters.sourceBranch = searchParams.get('sourceBranch')!;
-  }
-  
-  if (searchParams.has('targetBranch')) {
-    filters.targetBranch = searchParams.get('targetBranch')!;
   }
   
   if (searchParams.has('title')) {
