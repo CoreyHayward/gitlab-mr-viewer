@@ -21,7 +21,7 @@ export default function HomeContent() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
 
-  // Initialize UI state from localStorage first
+  // Initialize UI state from localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedUIState = loadUIState();
@@ -41,27 +41,55 @@ export default function HomeContent() {
   const loadAllMergeRequests = useCallback(async (currentFilters: FilterOptions) => {
     if (!service) return;
 
+    console.log('Loading all merge requests with filters:', currentFilters);
     setLoading(true);
     setError(null);
 
     try {
+      const startTime = Date.now();
       const mrs = await service.getAllMergeRequests(currentFilters);
+      const endTime = Date.now();
+      console.log(`Loaded ${mrs.length} merge requests in ${endTime - startTime}ms`);
       setMergeRequests(mrs);
     } catch (err) {
+      console.error('Error loading merge requests:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load merge requests';
-      setError(errorMessage);
-      setMergeRequests([]);
       
-      // If it's a timeout error, suggest alternatives
-      if (errorMessage.includes('timed out') || errorMessage.includes('Unable to load')) {
+      // Check if this is just the initial load without specific filters
+      const hasSpecificFilters = currentFilters.authors?.length || 
+                                currentFilters.assignee || 
+                                currentFilters.reviewer || 
+                                currentFilters.labels?.length || 
+                                currentFilters.sourceBranch || 
+                                currentFilters.targetBranch || 
+                                currentFilters.title ||
+                                currentFilters.dateFrom || 
+                                currentFilters.dateTo;
+
+      // For initial load without filters, show a gentler message
+      if (!hasSpecificFilters && errorMessage.includes('timed out')) {
         setError(
-          errorMessage + 
-          '\n\nTips to resolve this:\n' +
-          '• Select a specific project from the dropdown above for faster loading\n' +
-          '• Use author filters to search for specific people\'s merge requests\n' +
-          '• Your GitLab instance has many projects - try narrowing your search'
+          'Unable to load recent merge requests automatically.\n\n' +
+          'This is normal for very large GitLab instances. To view merge requests:\n' +
+          '• Select a specific project from the dropdown above, or\n' +
+          '• Use the filters below to search by author, labels, etc.'
         );
+      } else {
+        setError(errorMessage);
+        
+        // If it's a timeout error with filters, suggest alternatives
+        if (errorMessage.includes('timed out') || errorMessage.includes('Unable to load')) {
+          setError(
+            errorMessage + 
+            '\n\nTips to resolve this:\n' +
+            '• Select a specific project from the dropdown above for faster loading\n' +
+            '• Use author filters to search for specific people\'s merge requests\n' +
+            '• Your GitLab instance has many projects - try narrowing your search'
+          );
+        }
       }
+      
+      setMergeRequests([]);
     } finally {
       setLoading(false);
     }
@@ -88,11 +116,12 @@ export default function HomeContent() {
   useEffect(() => {
     if (!searchParams) return; // Wait for client-side initialization
     
+    console.log('URL params effect running with service:', !!service);
     const { filters: urlFilters, projectId } = decodeFiltersFromURL(searchParams);
     setFilters(urlFilters);
     setUrlProjectId(projectId);
     
-    // Only auto-expand filters if there are non-default filters AND user hasn't saved a preference
+    // Expand filters if any non-default filters are set
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
       urlFilters.authors?.length || 
       urlFilters.assignee || 
@@ -308,10 +337,10 @@ export default function HomeContent() {
                   if (!hasSpecificFilters) {
                     return (
                       <>
-                        Showing {mergeRequests.length} most recent merge requests across all projects.
+                        Showing {mergeRequests.length} of your recent merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects.
                         <br />
                         <span className="text-blue-600 dark:text-blue-400 font-medium">
-                          💡 Use the filters below (especially author names) to search for more merge requests.
+                          💡 Use the filters above to search for more merge requests.
                         </span>
                       </>
                     );
@@ -350,7 +379,7 @@ export default function HomeContent() {
               
               return hasSpecificFilters ? 
                 "Searching merge requests across all projects..." : 
-                "Loading 5 most recent merge requests from all projects...";
+                "Loading 5 most recent merge requests...";
             })()) : 
             undefined
           }

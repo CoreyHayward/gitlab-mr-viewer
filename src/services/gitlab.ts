@@ -65,12 +65,10 @@ export class GitLabService {
       }
     }
     
-    console.log(`Project cache: ${projectIds.length - projectsToFetch.length} cached, ${projectsToFetch.length} to fetch`);
-    
-    // Fetch projects that aren't cached or are expired
-    for (const projectId of projectsToFetch.slice(0, 10)) { // Limit to first 10 projects for performance
+    // Fetch projects that aren't cached or are expired - do this in parallel with shorter timeout
+    const projectFetchPromises = projectsToFetch.slice(0, 5).map(async (projectId) => { // Reduced to 5 projects
       try {
-        const project = await this.makeRequest<GitLabProject>(`/projects/${projectId}`, 3000);
+        const project = await this.makeRequest<GitLabProject>(`/projects/${projectId}`, 1500); // Reduced timeout
         
         const projectInfo = {
           id: project.id,
@@ -90,7 +88,10 @@ export class GitLabService {
       } catch (error) {
         console.warn(`Failed to fetch project ${projectId}:`, error);
       }
-    }
+    });
+
+    // Wait for all project fetches to complete (or fail)
+    await Promise.allSettled(projectFetchPromises);
     
     // Save updated cache to localStorage
     this.saveProjectCache(cache);
@@ -122,7 +123,6 @@ export class GitLabService {
         }
         
         if (removedCount > 0) {
-          console.log(`Cleaned up ${removedCount} expired cache entries`);
           this.saveProjectCache(cleanedCache);
         }
         
@@ -145,9 +145,6 @@ export class GitLabService {
   // Method to clear project cache if needed
   clearProjectCache(): void {
     try {
-      const cache = this.loadProjectCache();
-      const cacheSize = Object.keys(cache).length;
-      console.log(`Clearing project cache (${cacheSize} entries)`);
       localStorage.removeItem(this.CACHE_KEY);
     } catch (error) {
       console.warn('Failed to clear project cache:', error);
@@ -280,6 +277,17 @@ export class GitLabService {
   }
 
   async getAllMergeRequests(filters: FilterOptions = {}): Promise<GitLabMergeRequest[]> {
+    // Determine if we have specific filters early
+    const hasSpecificFilters = filters.authors?.length || 
+                              filters.assignee || 
+                              filters.reviewer || 
+                              filters.labels?.length || 
+                              filters.sourceBranch || 
+                              filters.targetBranch || 
+                              filters.title ||
+                              filters.dateFrom || 
+                              filters.dateTo;
+    
     const buildParams = (authorUsername?: string): URLSearchParams => {
       const params = new URLSearchParams();
       
@@ -319,40 +327,22 @@ export class GitLabService {
         params.append('created_before', filters.dateTo);
       }
 
-      params.append('scope', 'all');
+      // Don't use scope=all for initial load without filters as it's too intensive
+      if (hasSpecificFilters) {
+        params.append('scope', 'all');
+      }
+      
       params.append('order_by', 'updated_at');
       params.append('sort', 'desc');
 
-      // Determine page size based on whether filters are applied
-      const hasSpecificFilters = filters.authors?.length || 
-                                filters.assignee || 
-                                filters.reviewer || 
-                                filters.labels?.length || 
-                                filters.sourceBranch || 
-                                filters.targetBranch || 
-                                filters.title ||
-                                filters.dateFrom || 
-                                filters.dateTo;
-
-      // Conservative loading: fewer results if no specific filters
-      const pageSize = hasSpecificFilters ? '20' : '3';
+      // Conservative loading: even fewer results if no specific filters
+      const pageSize = hasSpecificFilters ? '20' : '5'; // Reduced from 10 to 5
       params.append('per_page', pageSize);
       
       return params;
     };
 
     let allMergeRequests: GitLabMergeRequest[] = [];
-
-    // Determine timeout based on filters
-    const hasSpecificFilters = filters.authors?.length || 
-                              filters.assignee || 
-                              filters.reviewer || 
-                              filters.labels?.length || 
-                              filters.sourceBranch || 
-                              filters.targetBranch || 
-                              filters.title ||
-                              filters.dateFrom || 
-                              filters.dateTo;
 
     try {
       // If authors specified, make multiple API calls for each author
@@ -378,7 +368,7 @@ export class GitLabService {
         // Single API call - rely on GitLab's server-side sorting
         const params = buildParams();
         const endpoint = `/merge_requests?${params.toString()}`;
-        const timeout = hasSpecificFilters ? 10000 : 3000;
+        const timeout = hasSpecificFilters ? 10000 : 12000; // Increased timeout for initial load even more
         allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, timeout);
       }
     } catch (error) {
@@ -473,9 +463,7 @@ export class GitLabService {
       const userMap = new Map<number, GitLabUser>();
       
       // First, find the top-level group the user belongs to
-      console.log('Finding top-level groups you belong to...');
       const groups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&top_level_only=true&per_page=10', 5000);
-      console.log(`Found ${groups.length} top-level groups you're a member of`);
       
       if (groups.length === 0) {
         console.log('No top-level groups found, trying regular groups...');
