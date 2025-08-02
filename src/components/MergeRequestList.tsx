@@ -115,38 +115,38 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       <div className="space-y-6">
         {loadingMessage && (
           <div className="text-center py-8">
-            <div className="inline-flex items-center space-x-3 px-6 py-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl">
-              <svg className="animate-spin w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24">
+            <div className="inline-flex items-center space-x-3 px-6 py-4 bg-violet-50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 rounded-xl">
+              <svg className="animate-spin w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
               </svg>
-              <span className="text-blue-700 dark:text-blue-300 font-medium">
+              <span className="text-violet-700 dark:text-violet-300 font-medium">
                 {loadingMessage}
               </span>
             </div>
           </div>
         )}
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+          <div key={i} className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl overflow-hidden shadow-sm">
             <div className="p-6 animate-pulse">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1 space-y-3">
                   <div className="flex items-center space-x-3">
-                    <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded-lg w-3/4"></div>
-                    <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded-full w-16"></div>
+                    <div className="h-5 bg-gray-200 dark:bg-neutral-700 rounded-lg w-3/4"></div>
+                    <div className="h-5 bg-gray-200 dark:bg-neutral-700 rounded-full w-16"></div>
                   </div>
-                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                  <div className="h-4 bg-gray-200 dark:bg-neutral-700 rounded w-1/2"></div>
                 </div>
-                <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded-full w-20"></div>
+                <div className="h-6 bg-gray-200 dark:bg-neutral-700 rounded-full w-20"></div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
+                <div className="h-4 bg-gray-200 dark:bg-neutral-700 rounded w-full"></div>
+                <div className="h-4 bg-gray-200 dark:bg-neutral-700 rounded w-full"></div>
+                <div className="h-4 bg-gray-200 dark:bg-neutral-700 rounded w-full"></div>
               </div>
               <div className="flex space-x-2">
                 {[...Array(3)].map((_, j) => (
-                  <div key={j} className="h-6 bg-gray-200 dark:bg-gray-700 rounded-full w-16"></div>
+                  <div key={j} className="h-6 bg-gray-200 dark:bg-neutral-700 rounded-full w-16"></div>
                 ))}
               </div>
             </div>
@@ -179,7 +179,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       {mergeRequests.map((mr) => (
         <div
           key={mr.id}
-          className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-slate-600 transition-all duration-200 overflow-hidden group"
+          className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-lg shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-neutral-600 transition-all duration-200 overflow-hidden group"
         >
           {/* Header */}
           <div className="p-4">
@@ -190,7 +190,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                     href={mr.web_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-base font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2 pr-2"
+                    className="text-base font-semibold text-gray-900 dark:text-white hover:text-violet-600 dark:hover:text-violet-400 transition-colors group-hover:text-violet-600 dark:group-hover:text-violet-400 line-clamp-2 pr-2"
                   >
                     {mr.title}
                   </a>
@@ -210,7 +210,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                           href={mr.project.web_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                          className="hover:text-violet-600 dark:hover:text-violet-400 transition-colors"
                         >
                           {mr.project.name}
                         </a>
@@ -327,15 +327,13 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
             {/* Merge Status - Only show if not mergeable */}
             {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && (
-              <div className="mt-3 p-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded">
-                <div className="flex items-center space-x-2">
-                  <svg className="w-3 h-3 text-amber-600 dark:text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+              <div className="mt-2 flex items-center">
+                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800 rounded-full">
+                  <svg className="w-3 h-3 mr-1 text-amber-600 dark:text-amber-400" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                   </svg>
-                  <span className="text-xs font-medium text-amber-800 dark:text-amber-200 capitalize">
-                    {mr.detailed_merge_status.replace(/_/g, ' ')}
-                  </span>
-                </div>
+                  {mr.detailed_merge_status.replace(/_/g, ' ')}
+                </span>
               </div>
             )}
           </div>

@@ -101,14 +101,14 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
 
   return (
     <div className="relative">
-      <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-4">
+      <div className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-lg p-4">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Select Project
         </label>
         
         <button
           onClick={handleToggleOpen}
-          className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm bg-white dark:bg-slate-700 text-left focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+          className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 dark:border-neutral-600 rounded-md shadow-sm bg-white dark:bg-neutral-700 text-left focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
         >
           <span className="text-gray-900 dark:text-white">
             {selectedProject ? selectedProject.path_with_namespace : 'All Projects'}
@@ -124,14 +124,14 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
         </button>
 
         {isOpen && (
-          <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-md shadow-lg">
+          <div className="absolute z-10 w-full mt-1 bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-md shadow-lg">
             <div className="p-3 border-b border-gray-200 dark:border-gray-700">
               <input
                 type="text"
                 placeholder="Search projects..."
                 value={searchTerm}
                 onChange={(e) => handleSearch(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-slate-700 dark:text-white text-sm"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-neutral-600 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-neutral-700 dark:text-white text-sm"
               />
             </div>
             
@@ -153,7 +153,7 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
                   <button
                     onClick={() => handleProjectSelect(null)}
                     className={`w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 ${
-                      !selectedProject ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                      !selectedProject ? 'bg-violet-50 dark:bg-violet-900/20' : ''
                     }`}
                   >
                     <div className="font-medium text-gray-900 dark:text-white">
@@ -168,7 +168,7 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
                       key={project.id}
                       onClick={() => handleProjectSelect(project)}
                       className={`w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0 focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 ${
-                        selectedProject?.id === project.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                        selectedProject?.id === project.id ? 'bg-violet-50 dark:bg-violet-900/20' : ''
                       }`}
                     >
                       <div className="font-medium text-gray-900 dark:text-white">

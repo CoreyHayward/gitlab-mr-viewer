@@ -89,11 +89,11 @@ export default function UserMultiSelect({
       <div className="relative" ref={dropdownRef}>
         {/* Selected users display */}
         {selectedUsers.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-slate-50 dark:bg-slate-900/10 rounded-lg border border-slate-200 dark:border-slate-800">
+          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-slate-50 dark:bg-neutral-900/10 rounded-lg border border-slate-200 dark:border-neutral-800">
             {selectedUserObjects.map(user => (
               <span
                 key={user.username}
-                className="inline-flex items-center px-3 py-1.5 bg-slate-100 dark:bg-slate-900/30 text-slate-800 dark:text-slate-200 text-sm rounded-full border border-slate-200 dark:border-slate-700"
+                className="inline-flex items-center px-3 py-1.5 bg-slate-100 dark:bg-neutral-900/30 text-slate-800 dark:text-neutral-200 text-sm rounded-full border border-slate-200 dark:border-neutral-700"
               >
                 <Image
                   src={user.avatar_url}
@@ -106,7 +106,7 @@ export default function UserMultiSelect({
                 <span className="text-violet-600 dark:text-violet-400 ml-1">@{user.username}</span>
                 <button
                   onClick={() => handleRemoveUser(user.username)}
-                  className="ml-2 p-0.5 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"
+                  className="ml-2 p-0.5 text-slate-600 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-neutral-200 hover:bg-slate-200 dark:hover:bg-neutral-800 rounded-full transition-colors"
                 >
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -149,7 +149,7 @@ export default function UserMultiSelect({
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => setIsOpen(true)}
             placeholder={placeholder}
-            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-slate-500"
+            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
           />
           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
             <svg
@@ -165,7 +165,7 @@ export default function UserMultiSelect({
 
         {/* Dropdown */}
         {isOpen && (
-          <div className="absolute z-50 w-full mt-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+          <div className="absolute z-50 w-full mt-2 bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-lg shadow-xl max-h-64 overflow-y-auto">
             {loading ? (
               <div className="p-4 text-center">
                 <div className="inline-flex items-center space-x-2 text-gray-500 dark:text-gray-400">

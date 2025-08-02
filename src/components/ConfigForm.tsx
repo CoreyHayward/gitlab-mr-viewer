@@ -71,7 +71,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-8 p-6 bg-white dark:bg-slate-800 rounded-lg shadow-lg">
+    <div className="max-w-md mx-auto mt-8 p-6 bg-white dark:bg-neutral-800 rounded-lg shadow-lg">
       <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
         GitLab Configuration
       </h2>
@@ -86,7 +86,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             id="instanceUrl"
             value={instanceUrl}
             onChange={(e) => setInstanceUrl(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-slate-700 dark:text-white"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-neutral-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-neutral-700 dark:text-white"
             placeholder="https://gitlab.com"
             required
           />
@@ -101,14 +101,14 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             id="token"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-slate-700 dark:text-white"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-neutral-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-neutral-700 dark:text-white"
             placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
             required
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Create a token at: Settings → Access Tokens → Personal Access Tokens
             <br />
-            Required scopes: <code className="bg-gray-100 dark:bg-slate-700 px-1 rounded">api</code>, <code className="bg-gray-100 dark:bg-slate-700 px-1 rounded">read_user</code>
+            Required scopes: <code className="bg-gray-100 dark:bg-neutral-700 px-1 rounded">api</code>, <code className="bg-gray-100 dark:bg-neutral-700 px-1 rounded">read_user</code>
           </p>
         </div>
 
@@ -140,11 +140,11 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
         </button>
       </form>
 
-      <div className="mt-6 p-4 bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800 rounded-md">
-        <h3 className="text-sm font-medium text-slate-800 dark:text-slate-300 mb-2">
+      <div className="mt-6 p-4 bg-slate-50 dark:bg-neutral-900/20 border border-slate-200 dark:border-neutral-800 rounded-md">
+        <h3 className="text-sm font-medium text-slate-800 dark:text-neutral-300 mb-2">
           🔒 Privacy & Security
         </h3>
-        <ul className="text-xs text-slate-700 dark:text-slate-400 space-y-1">
+        <ul className="text-xs text-slate-700 dark:text-neutral-400 space-y-1">
           <li>• Your token is stored only in your browser (memory or local storage if you choose)</li>
           <li>• All API calls are made directly from your browser to GitLab</li>
           <li>• No data is sent to or stored on our servers</li>
