@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import ConfigForm from '@/components/ConfigForm';
 import ProjectSelector from '@/components/ProjectSelector';
 import FilterPanel from '@/components/FilterPanel';
@@ -20,6 +20,8 @@ export default function HomeContent() {
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
+  
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize UI state from localStorage
   useEffect(() => {
@@ -41,17 +43,36 @@ export default function HomeContent() {
   const loadAllMergeRequests = useCallback(async (currentFilters: FilterOptions) => {
     if (!service) return;
 
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     console.log('Loading all merge requests with filters:', currentFilters);
     setLoading(true);
     setError(null);
 
     try {
       const startTime = Date.now();
-      const mrs = await service.getAllMergeRequests(currentFilters);
+      const mrs = await service.getAllMergeRequests(currentFilters, controller.signal);
       const endTime = Date.now();
       console.log(`Loaded ${mrs.length} merge requests in ${endTime - startTime}ms`);
-      setMergeRequests(mrs);
+      
+      // Only update state if this request wasn't cancelled
+      if (!controller.signal.aborted) {
+        setMergeRequests(mrs);
+      }
     } catch (err) {
+      // Don't show errors for cancelled requests
+      if (err instanceof Error && err.message === 'Request cancelled') {
+        console.log('Request was cancelled');
+        return;
+      }
+      
       console.error('Error loading merge requests:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load merge requests';
       
@@ -86,24 +107,49 @@ export default function HomeContent() {
       
       setMergeRequests([]);
     } finally {
-      setLoading(false);
+      // Only clear loading if this request wasn't cancelled
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [service]);
 
   const loadMergeRequests = useCallback(async (project: GitLabProject, currentFilters: FilterOptions) => {
     if (!service) return;
 
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError(null);
 
     try {
-      const mrs = await service.getMergeRequests(project.id, currentFilters);
-      setMergeRequests(mrs);
+      const mrs = await service.getMergeRequests(project.id, currentFilters, controller.signal);
+      
+      // Only update state if this request wasn't cancelled
+      if (!controller.signal.aborted) {
+        setMergeRequests(mrs);
+      }
     } catch (err) {
+      // Don't show errors for cancelled requests
+      if (err instanceof Error && err.message === 'Request cancelled') {
+        console.log('Request was cancelled');
+        return;
+      }
+      
       setError(err instanceof Error ? err.message : 'Failed to load merge requests');
       setMergeRequests([]);
     } finally {
-      setLoading(false);
+      // Only clear loading if this request wasn't cancelled
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [service]);
 
@@ -204,6 +250,12 @@ export default function HomeContent() {
   };
 
   const handleDisconnect = () => {
+    // Cancel any pending requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
     setService(null);
     setSelectedProject(null);
     setMergeRequests([]);
@@ -218,6 +270,15 @@ export default function HomeContent() {
     url.search = '';
     window.history.replaceState({}, '', url.toString());
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   if (!service) {
     return (

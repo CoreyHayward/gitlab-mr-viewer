@@ -11,11 +11,21 @@ export class GitLabService {
     this.token = token;
   }
 
-  private async makeRequest<T>(endpoint: string, timeout: number = 30000): Promise<T> {
+  private async makeRequest<T>(endpoint: string, timeout: number = 30000, externalSignal?: AbortSignal): Promise<T> {
     const url = `${this.baseUrl}/api/v4${endpoint}`;
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    // If an external signal is provided, listen for its abort event
+    const abortHandler = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        clearTimeout(timeoutId);
+        throw new Error('Request cancelled');
+      }
+      externalSignal.addEventListener('abort', abortHandler);
+    }
     
     try {
       const response = await fetch(url, {
@@ -29,6 +39,9 @@ export class GitLabService {
       });
 
       clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
 
       if (!response.ok) {
         throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
@@ -37,7 +50,14 @@ export class GitLabService {
       return response.json();
     } catch (error) {
       clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+      
       if (error instanceof Error && error.name === 'AbortError') {
+        if (externalSignal?.aborted) {
+          throw new Error('Request cancelled');
+        }
         throw new Error('Request timed out. Try reducing the scope or filtering your search.');
       }
       throw error;
@@ -172,17 +192,18 @@ export class GitLabService {
     }
   }
 
-  async getProjects(search?: string): Promise<GitLabProject[]> {
+  async getProjects(search?: string, signal?: AbortSignal): Promise<GitLabProject[]> {
     let endpoint = '/projects?membership=true&simple=true&per_page=100';
     if (search) {
       endpoint += `&search=${encodeURIComponent(search)}`;
     }
-    return this.makeRequest<GitLabProject[]>(endpoint);
+    return this.makeRequest<GitLabProject[]>(endpoint, 30000, signal);
   }
 
   async getMergeRequests(
     projectId: number,
-    filters: FilterOptions = {}
+    filters: FilterOptions = {},
+    signal?: AbortSignal
   ): Promise<GitLabMergeRequest[]> {
     const buildParams = (authorUsername?: string): URLSearchParams => {
       const params = new URLSearchParams();
@@ -219,9 +240,12 @@ export class GitLabService {
         const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
         
         try {
-          const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint);
+          const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
           allMergeRequests.push(...authorMRs);
         } catch (error) {
+          if (error instanceof Error && error.message === 'Request cancelled') {
+            throw error;
+          }
           console.warn(`Failed to fetch MRs for author ${author}:`, error);
         }
       }
@@ -236,7 +260,7 @@ export class GitLabService {
       // Single API call - rely on GitLab's server-side sorting
       const params = buildParams();
       const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
-      allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint);
+      allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
     }
     
     // Enrich merge requests with project information
@@ -256,7 +280,7 @@ export class GitLabService {
     });
   }
 
-  async getAllMergeRequests(filters: FilterOptions = {}): Promise<GitLabMergeRequest[]> {
+  async getAllMergeRequests(filters: FilterOptions = {}, signal?: AbortSignal): Promise<GitLabMergeRequest[]> {
     // Determine if we have specific filters early
     const hasSpecificFilters = filters.authors?.length || 
                               filters.title ||
@@ -307,9 +331,12 @@ export class GitLabService {
           const endpoint = `/merge_requests?${params.toString()}`;
           
           try {
-            const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 5000);
+            const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 5000, signal);
             allMergeRequests.push(...authorMRs);
           } catch (error) {
+            if (error instanceof Error && error.message === 'Request cancelled') {
+              throw error;
+            }
             console.warn(`Failed to fetch MRs for author ${author}:`, error);
           }
         }
@@ -323,8 +350,8 @@ export class GitLabService {
         // Single API call - rely on GitLab's server-side sorting
         const params = buildParams();
         const endpoint = `/merge_requests?${params.toString()}`;
-        const timeout = hasSpecificFilters ? 10000 : 12000; // Increased timeout for initial load even more
-        allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, timeout);
+        const timeout = hasSpecificFilters ? 10000 : 12000;
+        allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, timeout, signal);
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes('timed out')) {
@@ -372,14 +399,14 @@ export class GitLabService {
     }
   }
 
-  async getUsers(search?: string): Promise<GitLabUser[]> {
+  async getUsers(search?: string, signal?: AbortSignal): Promise<GitLabUser[]> {
     try {
       const allUsers = new Map<number, GitLabUser>();
       
       // Run group search only (no project users)
       console.log('Searching for users in your organization groups...');
       const [groupUsers] = await Promise.allSettled([
-        this.getGroupUsers(search)
+        this.getGroupUsers(search, signal)
       ]);
 
       // Process group users results
@@ -398,10 +425,13 @@ export class GitLabService {
       if (search && search.trim() && combinedUsers.length === 0) {
         console.log(`No users found for search "${search}" in groups/projects. Trying direct user search for debugging...`);
         try {
-          const directSearch = await this.makeRequest<GitLabUser[]>(`/users?search=${encodeURIComponent(search.trim())}&per_page=10`, 3000);
+          const directSearch = await this.makeRequest<GitLabUser[]>(`/users?search=${encodeURIComponent(search.trim())}&per_page=10`, 3000, signal);
           console.log('Direct user search results:', directSearch.map(u => `${u.username} (${u.name})`).join(', '));
           console.log('Note: These users may not be in your organization. Add them to your groups/projects to access them through the regular search.');
         } catch (error) {
+          if (error instanceof Error && error.message === 'Request cancelled') {
+            throw error;
+          }
           console.warn('Direct user search failed:', error);
         }
       }
@@ -413,16 +443,16 @@ export class GitLabService {
     }
   }
 
-  private async getGroupUsers(search?: string): Promise<GitLabUser[]> {
+  private async getGroupUsers(search?: string, signal?: AbortSignal): Promise<GitLabUser[]> {
     try {
       const userMap = new Map<number, GitLabUser>();
       
       // First, find the top-level group the user belongs to
-      const groups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&top_level_only=true&per_page=10', 5000);
+      const groups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&top_level_only=true&per_page=10', 5000, signal);
       
       if (groups.length === 0) {
         console.log('No top-level groups found, trying regular groups...');
-        const allGroups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&per_page=10', 5000);
+        const allGroups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&per_page=10', 5000, signal);
         // Use the first group as fallback
         if (allGroups.length > 0) {
           groups.push(allGroups[0]);
@@ -443,7 +473,7 @@ export class GitLabService {
           console.log(`Using server-side search for: "${search}"`);
         }
         
-        const groupMembers = await this.makeRequest<GitLabUser[]>(groupEndpoint, 6000);
+        const groupMembers = await this.makeRequest<GitLabUser[]>(groupEndpoint, 6000, signal);
         console.log(`Found ${groupMembers.length} members in ${primaryGroup.name} group`);
         
         groupMembers.forEach(member => {

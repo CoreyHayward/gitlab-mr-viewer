@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { GitLabProject } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
 import { loadUIState, saveUIState } from '@/utils/uiState';
@@ -17,6 +17,8 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize UI state from localStorage
   useEffect(() => {
@@ -30,33 +32,82 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
 
   useEffect(() => {
     const loadInitialProjects = async () => {
+      // Cancel any pending request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Create new AbortController for this request
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       setLoading(true);
       setError(null);
       
       try {
-        const projectList = await service.getProjects();
-        setProjects(projectList);
+        const projectList = await service.getProjects(undefined, controller.signal);
+        
+        // Only update state if this request wasn't cancelled
+        if (!controller.signal.aborted) {
+          setProjects(projectList);
+        }
       } catch (err) {
+        // Don't show errors for cancelled requests
+        if (err instanceof Error && err.message === 'Request cancelled') {
+          return;
+        }
+        
         setError(err instanceof Error ? err.message : 'Failed to load projects');
       } finally {
-        setLoading(false);
+        // Only clear loading if this request wasn't cancelled
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     loadInitialProjects();
+
+    // Cleanup on unmount or service change
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [service]);
 
   const loadProjects = async (search?: string) => {
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError(null);
     
     try {
-      const projectList = await service.getProjects(search);
-      setProjects(projectList);
+      const projectList = await service.getProjects(search, controller.signal);
+      
+      // Only update state if this request wasn't cancelled
+      if (!controller.signal.aborted) {
+        setProjects(projectList);
+      }
     } catch (err) {
+      // Don't show errors for cancelled requests
+      if (err instanceof Error && err.message === 'Request cancelled') {
+        return;
+      }
+      
       setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
-      setLoading(false);
+      // Only clear loading if this request wasn't cancelled
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   };
 
@@ -80,24 +131,6 @@ export default function ProjectSelector({ service, selectedProject, onProjectSel
     setIsOpen(false);
     saveUIState({ projectSelectorOpen: false });
   };
-
-  useEffect(() => {
-    const loadInitialProjects = async () => {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        const projectList = await service.getProjects();
-        setProjects(projectList);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load projects');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadInitialProjects();
-  }, [service]);
 
   return (
     <div className="relative">

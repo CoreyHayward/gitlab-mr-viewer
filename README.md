@@ -93,7 +93,7 @@ The following files enable GitHub Pages deployment:
 
 - 🔒 **No Server Processing**: All GitLab API calls are made client-side
 - 🚫 **No Data Storage**: Your API token and data are never sent to our servers
-- 💾 **Memory Only**: Token is stored in browser memory and cleared on page refresh
+- 💾 **Local Storage Only**: Token is stored in your browsers local storage
 - 🌐 **Direct Connection**: Your browser connects directly to GitLab's API
 - 📦 **Static Deployment**: Can be self-hosted on any static hosting service
 
@@ -119,13 +119,6 @@ The following files enable GitHub Pages deployment:
 - GitLab.com (gitlab.com)
 - Self-managed GitLab instances
 - GitLab Enterprise
-
-## Browser Compatibility
-
-Works in all modern browsers that support:
-- ES2020 features
-- Fetch API
-- CSS Grid and Flexbox
 
 ## Contributing
 

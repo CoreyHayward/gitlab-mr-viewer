@@ -26,6 +26,7 @@ export default function UserMultiSelect({
   const [isOpen, setIsOpen] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Debounce search term
   useEffect(() => {
@@ -39,18 +40,45 @@ export default function UserMultiSelect({
   // Load initial users and search results
   useEffect(() => {
     const loadUsers = async () => {
+      // Cancel any pending request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Create new AbortController for this request
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       setLoading(true);
       try {
-        const userList = await service.getUsers(debouncedSearch);
-        setUsers(userList);
+        const userList = await service.getUsers(debouncedSearch, controller.signal);
+        
+        // Only update state if this request wasn't cancelled
+        if (!controller.signal.aborted) {
+          setUsers(userList);
+        }
       } catch (error) {
+        // Don't log errors for cancelled requests
+        if (error instanceof Error && error.message === 'Request cancelled') {
+          return;
+        }
         console.error('Failed to load users:', error);
       } finally {
-        setLoading(false);
+        // Only clear loading if this request wasn't cancelled
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     loadUsers();
+
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [service, debouncedSearch]);
 
   // Close dropdown when clicking outside
