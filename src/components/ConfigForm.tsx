@@ -121,7 +121,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
           />
           <label htmlFor="rememberMe" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-            Remember my credentials (stored securely in browser)
+            Remember my credentials (stored in browser local storage)
           </label>
         </div>
 
@@ -145,10 +145,10 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
           🔒 Privacy & Security
         </h3>
         <ul className="text-xs text-slate-700 dark:text-neutral-400 space-y-1">
-          <li>• Your token is stored only in your browser (memory or local storage if you choose)</li>
+          <li>• Your token is stored only in your browser (memory or local storage if you choose &quot;Remember me&quot;)</li>
           <li>• All API calls are made directly from your browser to GitLab</li>
           <li>• No data is sent to or stored on our servers</li>
-          <li>• Refresh the page to clear your token from memory</li>
+          <li>• Refresh the page to clear your token from memory (or clear your local storage if you choose &quot;Remember me&quot;)</li>
         </ul>
       </div>
     </div>
