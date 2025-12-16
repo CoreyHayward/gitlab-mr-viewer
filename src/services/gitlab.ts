@@ -85,10 +85,10 @@ export class GitLabService {
       }
     }
     
-    // Fetch projects that aren't cached or are expired - do this in parallel with shorter timeout
-    const projectFetchPromises = projectsToFetch.slice(0, 5).map(async (projectId) => { // Reduced to 5 projects
+    // Fetch ALL uncached projects in parallel (up to 20) with reasonable timeout
+    const projectFetchPromises = projectsToFetch.slice(0, 20).map(async (projectId) => {
       try {
-        const project = await this.makeRequest<GitLabProject>(`/projects/${projectId}`, 1500); // Reduced timeout
+        const project = await this.makeRequest<GitLabProject>(`/projects/${projectId}`, 3000);
         
         const projectInfo = {
           id: project.id,
@@ -105,13 +105,22 @@ export class GitLabService {
           project: projectInfo,
           timestamp: now
         };
+        
+        return projectInfo;
       } catch (error) {
         console.warn(`Failed to fetch project ${projectId}:`, error);
+        return null;
       }
     });
 
     // Wait for all project fetches to complete (or fail)
-    await Promise.allSettled(projectFetchPromises);
+    const results = await Promise.allSettled(projectFetchPromises);
+    
+    // Count successful fetches for logging
+    const successCount = results.filter(r => r.status === 'fulfilled' && r.value !== null).length;
+    if (projectsToFetch.length > 0) {
+      console.log(`Fetched ${successCount}/${Math.min(projectsToFetch.length, 20)} project details from API`);
+    }
     
     // Save updated cache to localStorage
     this.saveProjectCache(cache);
@@ -233,31 +242,42 @@ export class GitLabService {
 
     let allMergeRequests: GitLabMergeRequest[] = [];
 
-    // If authors specified, make multiple API calls for each author
+    // If authors specified, make PARALLEL API calls for each author
     if (filters.authors && filters.authors.length > 0) {
-      for (const author of filters.authors) {
+      const authorPromises = filters.authors.map(async (author) => {
         const params = buildParams(author);
         const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
         
         try {
-          const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
-          allMergeRequests.push(...authorMRs);
+          return await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
         } catch (error) {
           if (error instanceof Error && error.message === 'Request cancelled') {
             throw error;
           }
           console.warn(`Failed to fetch MRs for author ${author}:`, error);
+          return [];
+        }
+      });
+      
+      // Wait for all author requests in parallel
+      const results = await Promise.all(authorPromises);
+      
+      // Flatten and deduplicate using Map (faster than filter+findIndex)
+      const mrMap = new Map<number, GitLabMergeRequest>();
+      for (const authorMRs of results) {
+        for (const mr of authorMRs) {
+          if (!mrMap.has(mr.id)) {
+            mrMap.set(mr.id, mr);
+          }
         }
       }
       
-      // Remove duplicates and sort only when combining multiple author results
-      allMergeRequests = allMergeRequests
-        .filter((mr, index, self) => 
-          index === self.findIndex(m => m.id === mr.id)
-        )
-        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+      allMergeRequests = Array.from(mrMap.values());
+      
+      // Sort once after deduplication
+      allMergeRequests.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     } else {
-      // Single API call - rely on GitLab's server-side sorting
+      // Single API call - already sorted by GitLab
       const params = buildParams();
       const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
       allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
@@ -314,8 +334,8 @@ export class GitLabService {
       params.append('order_by', 'updated_at');
       params.append('sort', 'desc');
 
-      // Conservative loading: even fewer results if no specific filters
-      const pageSize = hasSpecificFilters ? '20' : '5'; // Reduced from 10 to 5
+      // More generous page size for author-specific queries
+      const pageSize = hasSpecificFilters ? '50' : '5';
       params.append('per_page', pageSize);
       
       return params;
@@ -324,30 +344,44 @@ export class GitLabService {
     let allMergeRequests: GitLabMergeRequest[] = [];
 
     try {
-      // If authors specified, make multiple API calls for each author
+      // If authors specified, make PARALLEL API calls for each author
       if (filters.authors && filters.authors.length > 0) {
-        for (const author of filters.authors) {
+        const authorPromises = filters.authors.map(async (author) => {
           const params = buildParams(author);
           const endpoint = `/merge_requests?${params.toString()}`;
           
           try {
-            const authorMRs = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 5000, signal);
-            allMergeRequests.push(...authorMRs);
+            return await this.makeRequest<GitLabMergeRequest[]>(endpoint, 8000, signal);
           } catch (error) {
             if (error instanceof Error && error.message === 'Request cancelled') {
               throw error;
             }
             console.warn(`Failed to fetch MRs for author ${author}:`, error);
+            return [];
+          }
+        });
+        
+        // Wait for all author requests in parallel
+        const results = await Promise.all(authorPromises);
+        
+        // Flatten results and deduplicate using a Map (much faster than filter+findIndex)
+        const mrMap = new Map<number, GitLabMergeRequest>();
+        for (const authorMRs of results) {
+          for (const mr of authorMRs) {
+            // Keep the MR with the most recent updated_at if duplicate
+            const existing = mrMap.get(mr.id);
+            if (!existing || new Date(mr.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
+              mrMap.set(mr.id, mr);
+            }
           }
         }
         
-        // Remove duplicates and sort only when combining multiple author results
-        allMergeRequests = allMergeRequests
-          .filter((mr, index, self) => 
-            index === self.findIndex(m => m.id === mr.id)
-          );
+        allMergeRequests = Array.from(mrMap.values());
+        
+        // Sort once after deduplication - GitLab sorts per-author, but we need to re-sort combined results
+        allMergeRequests.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
       } else {
-        // Single API call - rely on GitLab's server-side sorting
+        // Single API call - already sorted by GitLab, no need to re-sort
         const params = buildParams();
         const endpoint = `/merge_requests?${params.toString()}`;
         const timeout = hasSpecificFilters ? 10000 : 12000;
@@ -361,13 +395,11 @@ export class GitLabService {
       }
     }
     
-    // Enrich merge requests with project information
+    // Enrich merge requests with project information in parallel
     allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
     
-    // Apply client-side filters only
-    return allMergeRequests
-          .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-          .filter(mr => {
+    // Apply client-side filters only (no need to re-sort, already sorted above)
+    return allMergeRequests.filter(mr => {
       if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
         return false;
       }
