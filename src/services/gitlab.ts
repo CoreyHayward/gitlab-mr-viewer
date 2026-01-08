@@ -292,6 +292,10 @@ export class GitLabService {
         return false;
       }
       
+      if (filters.excludeTitle && mr.title.toLowerCase().includes(filters.excludeTitle.toLowerCase())) {
+        return false;
+      }
+      
       if (filters.draft !== undefined && mr.draft !== filters.draft) {
         return false;
       }
@@ -401,6 +405,10 @@ export class GitLabService {
     // Apply client-side filters only (no need to re-sort, already sorted above)
     return allMergeRequests.filter(mr => {
       if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
+        return false;
+      }
+      
+      if (filters.excludeTitle && mr.title.toLowerCase().includes(filters.excludeTitle.toLowerCase())) {
         return false;
       }
       

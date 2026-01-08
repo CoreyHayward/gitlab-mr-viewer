@@ -67,6 +67,7 @@ export interface FilterOptions {
   state?: 'opened' | 'closed' | 'merged' | 'all';
   authors?: string[];
   title?: string;
+  excludeTitle?: string;
   draft?: boolean;
   dateFrom?: string;
   dateTo?: string;

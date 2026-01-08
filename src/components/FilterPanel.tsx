@@ -145,7 +145,7 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
               <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">
                 Search & Scope
               </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Title Search */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -162,6 +162,27 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                       value={localFilters.title || ''}
                       onChange={(e) => handleFilterChange('title', e.target.value || undefined)}
                       placeholder="Search merge request titles..."
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Exclude Title */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Exclude by Title
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                      </svg>
+                    </div>
+                    <input
+                      type="text"
+                      value={localFilters.excludeTitle || ''}
+                      onChange={(e) => handleFilterChange('excludeTitle', e.target.value || undefined)}
+                      placeholder="Exclude titles containing..."
                       className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
                     />
                   </div>

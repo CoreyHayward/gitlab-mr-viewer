@@ -19,6 +19,10 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): 
     params.set('title', filters.title);
   }
   
+  if (filters.excludeTitle) {
+    params.set('excludeTitle', filters.excludeTitle);
+  }
+  
   if (filters.draft !== undefined) {
     params.set('draft', filters.draft.toString());
   }
@@ -65,6 +69,10 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
   
   if (searchParams.has('title')) {
     filters.title = searchParams.get('title')!;
+  }
+  
+  if (searchParams.has('excludeTitle')) {
+    filters.excludeTitle = searchParams.get('excludeTitle')!;
   }
   
   if (searchParams.has('draft')) {

@@ -166,6 +166,7 @@ export default function HomeContent() {
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
       urlFilters.authors?.length || 
       urlFilters.title || 
+      urlFilters.excludeTitle ||
       urlFilters.draft !== undefined || 
       urlFilters.dateFrom || 
       urlFilters.dateTo ||
