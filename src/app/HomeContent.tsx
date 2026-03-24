@@ -15,13 +15,13 @@ type QuickFilterOverride = 'my-open-prs';
 export default function HomeContent() {
   const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
   const [service, setService] = useState<GitLabService | null>(null);
-  const [selectedProject, setSelectedProject] = useState<GitLabProject | null>(null);
+  const [selectedProjects, setSelectedProjects] = useState<GitLabProject[]>([]);
   const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
+  const [urlProjectIds, setUrlProjectIds] = useState<number[]>([]);
   const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
   const [quickFilterOverride, setQuickFilterOverride] = useState<QuickFilterOverride | null>(null);
   
@@ -172,8 +172,8 @@ export default function HomeContent() {
     }
   }, [service, hydrateApprovalStatuses]);
 
-  const loadMergeRequests = useCallback(async (project: GitLabProject, currentFilters: FilterOptions) => {
-    if (!service) return;
+  const loadProjectMergeRequests = useCallback(async (projects: GitLabProject[], currentFilters: FilterOptions) => {
+    if (!service || projects.length === 0) return;
 
     // Cancel any pending request
     if (abortControllerRef.current) {
@@ -191,7 +191,13 @@ export default function HomeContent() {
     setError(null);
 
     try {
-      const mrs = await service.getMergeRequests(project.id, currentFilters, controller.signal);
+      const mrs = projects.length === 1
+        ? await service.getMergeRequests(projects[0].id, currentFilters, controller.signal)
+        : await service.getMergeRequestsForProjects(
+            projects.map((project) => project.id),
+            currentFilters,
+            controller.signal
+          );
       
       // Only update state if this request wasn't cancelled
       if (!controller.signal.aborted) {
@@ -222,9 +228,9 @@ export default function HomeContent() {
     if (!searchParams) return; // Wait for client-side initialization
     
     console.log('URL params effect running with service:', !!service);
-    const { filters: urlFilters, projectId } = decodeFiltersFromURL(searchParams);
+    const { filters: urlFilters, projectIds } = decodeFiltersFromURL(searchParams);
     setFilters(urlFilters);
-    setUrlProjectId(projectId);
+    setUrlProjectIds(projectIds || []);
     
     // Expand filters if any non-default filters are set
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
@@ -246,37 +252,45 @@ export default function HomeContent() {
     }
 
     // Load all MRs when service is available and no specific project is selected
-    if (service && !projectId) {
+    if (service && (!projectIds || projectIds.length === 0)) {
       loadAllMergeRequests(urlFilters);
     }
   }, [searchParams, service, loadAllMergeRequests]);
 
   // Auto-select project from URL when service is available
   useEffect(() => {
-    if (service && urlProjectId && !selectedProject) {
-      // Try to load the project from the URL
-      service.getProjects().then(projects => {
-        const project = projects.find(p => p.id === urlProjectId);
-        if (project) {
-          setSelectedProject(project);
-          loadMergeRequests(project, filters);
-        }
-      }).catch(() => {
-        console.warn('Failed to load project from URL');
-      });
-    } else if (service && !urlProjectId) {
-      // Just load all MRs when no specific project is selected
-      // We don't need to store all projects in state
-    }
-  }, [service, urlProjectId, selectedProject, filters, loadMergeRequests]);
+    if (service && urlProjectIds.length > 0 && selectedProjects.length === 0) {
+      Promise.all(
+        urlProjectIds.map((projectId) =>
+          service.getProject(projectId).catch(() => null)
+        )
+      ).then((projects) => {
+        const resolvedProjects = projects.filter((project): project is GitLabProject => project !== null);
 
-  const handleProjectSelect = (project: GitLabProject | null) => {
-    setSelectedProject(project);
-    if (project) {
-      updateURL(effectiveFilters, project.id);
-      loadMergeRequests(project, effectiveFilters);
+        if (resolvedProjects.length > 0) {
+          setSelectedProjects(resolvedProjects);
+          loadProjectMergeRequests(resolvedProjects, filters);
+          return;
+        }
+
+        loadAllMergeRequests(filters);
+      }).catch(() => {
+        console.warn('Failed to load projects from URL');
+        loadAllMergeRequests(filters);
+      });
+    }
+  }, [service, urlProjectIds, selectedProjects.length, filters, loadAllMergeRequests, loadProjectMergeRequests]);
+
+  const handleProjectsChange = (projects: GitLabProject[]) => {
+    const projectIds = projects.map((project) => project.id);
+
+    setSelectedProjects(projects);
+    setUrlProjectIds(projectIds);
+    if (projectIds.length > 0) {
+      updateURL(effectiveFilters, projectIds);
+      loadProjectMergeRequests(projects, effectiveFilters);
     } else {
-      updateURL(effectiveFilters, undefined);
+      updateURL(effectiveFilters, []);
       loadAllMergeRequests(effectiveFilters);
     }
   };
@@ -284,9 +298,9 @@ export default function HomeContent() {
   const handleFiltersChange = (newFilters: FilterOptions) => {
     setQuickFilterOverride(null);
     setFilters(newFilters);
-    updateURL(newFilters, selectedProject?.id);
-    if (selectedProject) {
-      loadMergeRequests(selectedProject, newFilters);
+    updateURL(newFilters, selectedProjects.map((project) => project.id));
+    if (selectedProjects.length > 0) {
+      loadProjectMergeRequests(selectedProjects, newFilters);
     } else {
       loadAllMergeRequests(newFilters);
     }
@@ -327,10 +341,10 @@ export default function HomeContent() {
       : filters;
 
     setQuickFilterOverride(nextOverride);
-    updateURL(nextFilters, selectedProject?.id);
+    updateURL(nextFilters, selectedProjects.map((project) => project.id));
 
-    if (selectedProject) {
-      loadMergeRequests(selectedProject, nextFilters);
+    if (selectedProjects.length > 0) {
+      loadProjectMergeRequests(selectedProjects, nextFilters);
     } else {
       loadAllMergeRequests(nextFilters);
     }
@@ -339,8 +353,8 @@ export default function HomeContent() {
   const handleRefresh = () => {
     service?.clearApprovalCache();
 
-    if (selectedProject) {
-      loadMergeRequests(selectedProject, effectiveFilters);
+    if (selectedProjects.length > 0) {
+      loadProjectMergeRequests(selectedProjects, effectiveFilters);
     } else {
       loadAllMergeRequests(effectiveFilters);
     }
@@ -369,12 +383,12 @@ export default function HomeContent() {
     }
     
     setService(null);
-    setSelectedProject(null);
+    setSelectedProjects([]);
     setMergeRequests([]);
     setError(null);
     setCurrentUser(null);
     setQuickFilterOverride(null);
-    setUrlProjectId(undefined);
+    setUrlProjectIds([]);
     setFilters({ state: 'opened' });
     localStorage.removeItem('gitlab-instance-url');
     localStorage.removeItem('gitlab-token');
@@ -432,7 +446,7 @@ export default function HomeContent() {
             >
               {loading ? 'Refreshing...' : 'Refresh'}
             </button>
-            {selectedProject && (
+            {selectedProjects.length > 0 && (
               <button
                 onClick={handleShareURL}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
@@ -453,8 +467,8 @@ export default function HomeContent() {
         <div className="mb-6">
           <ProjectSelector
             service={service}
-            selectedProject={selectedProject}
-            onProjectSelect={handleProjectSelect}
+            selectedProjects={selectedProjects}
+            onProjectsChange={handleProjectsChange}
           />
         </div>
 
@@ -534,10 +548,18 @@ export default function HomeContent() {
         {/* Results Summary */}
         {!loading && !error && (
           <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-            {selectedProject ? (
+            {selectedProjects.length === 1 ? (
               <>
                 Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
-                {' '}in <strong>{selectedProject.path_with_namespace}</strong>
+                {' '}in <strong>{selectedProjects[0].path_with_namespace}</strong>
+                {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
+                  <span> by {effectiveFilters.authors.join(', ')}</span>
+                )}
+              </>
+            ) : selectedProjects.length > 1 ? (
+              <>
+                Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
+                {' '}across <strong>{selectedProjects.length} selected projects</strong>
                 {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
                   <span> by {effectiveFilters.authors.join(', ')}</span>
                 )}
@@ -581,8 +603,8 @@ export default function HomeContent() {
         <MergeRequestList 
           mergeRequests={mergeRequests} 
           loading={loading} 
-          showProjectInfo={!selectedProject}
-          loadingMessage={!selectedProject ? 
+          showProjectInfo={selectedProjects.length !== 1}
+          loadingMessage={selectedProjects.length === 0 ? 
             ((() => {
               const hasSpecificFilters = effectiveFilters.authors?.length || 
                                         effectiveFilters.approvalState ||
@@ -595,7 +617,9 @@ export default function HomeContent() {
                 "Searching merge requests across all projects..." : 
                 "Loading 5 most recent merge requests...";
             })()) : 
-            undefined
+            selectedProjects.length > 1
+              ? `Loading merge requests from ${selectedProjects.length} selected projects...`
+              : undefined
           }
         />
 
@@ -603,11 +627,15 @@ export default function HomeContent() {
         {!loading && mergeRequests.length === 0 && !error && (
           <div className="text-center py-12">
             <div className="text-gray-500 dark:text-gray-400 text-lg mb-2">
-              {selectedProject ? 'No merge requests found in this project' : 'No merge requests found'}
+              {selectedProjects.length === 1
+                ? 'No merge requests found in this project'
+                : selectedProjects.length > 1
+                  ? 'No merge requests found in the selected projects'
+                  : 'No merge requests found'}
             </div>
             <div className="text-gray-400 dark:text-gray-500 text-sm">
-              {selectedProject 
-                ? 'Try adjusting your filters or select a different project'
+              {selectedProjects.length > 0
+                ? 'Try adjusting your filters or select different projects'
                 : 'Try adjusting your filters or select a specific project'
               }
             </div>

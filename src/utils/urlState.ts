@@ -2,11 +2,15 @@ import { FilterOptions } from '@/types/gitlab';
 
 const VALID_APPROVAL_STATES = new Set(['needs-review', 'partially-approved', 'approved']);
 
-export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): string => {
+export const encodeFiltersToURL = (filters: FilterOptions, projectIds?: number[]): string => {
   const params = new URLSearchParams();
   
-  if (projectId) {
-    params.set('project', projectId.toString());
+  if (projectIds && projectIds.length === 1) {
+    params.set('project', projectIds[0].toString());
+  }
+
+  if (projectIds && projectIds.length > 1) {
+    params.set('projectIds', projectIds.join(','));
   }
   
   if (filters.state && filters.state !== 'opened') {
@@ -52,14 +56,26 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): 
   return params.toString();
 };
 
-export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: FilterOptions; projectId?: number } => {
+export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: FilterOptions; projectIds?: number[] } => {
   const filters: FilterOptions = { state: 'opened' };
-  let projectId: number | undefined;
+  let projectIds: number[] | undefined;
+
+  if (searchParams.has('projectIds')) {
+    const ids = searchParams
+      .get('projectIds')!
+      .split(',')
+      .map((id) => parseInt(id.trim(), 10))
+      .filter((id) => !isNaN(id));
+
+    if (ids.length > 0) {
+      projectIds = ids;
+    }
+  }
   
-  if (searchParams.has('project')) {
+  if (!projectIds && searchParams.has('project')) {
     const id = parseInt(searchParams.get('project')!);
     if (!isNaN(id)) {
-      projectId = id;
+      projectIds = [id];
     }
   }
   
@@ -115,12 +131,12 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
     }
   }
   
-  return { filters, projectId };
+  return { filters, projectIds };
 };
 
-export const updateURL = (filters: FilterOptions, projectId?: number) => {
+export const updateURL = (filters: FilterOptions, projectIds?: number[]) => {
   const url = new URL(window.location.href);
-  const queryString = encodeFiltersToURL(filters, projectId);
+  const queryString = encodeFiltersToURL(filters, projectIds);
   
   if (queryString) {
     url.search = '?' + queryString;

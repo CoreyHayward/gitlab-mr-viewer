@@ -225,6 +225,10 @@ export class GitLabService {
     return this.makeRequest<GitLabProject[]>(endpoint, 30000, signal);
   }
 
+  async getProject(projectId: number, signal?: AbortSignal): Promise<GitLabProject> {
+    return this.makeRequest<GitLabProject>(`/projects/${projectId}`, 30000, signal);
+  }
+
   async getCurrentUser(signal?: AbortSignal): Promise<GitLabUser> {
     if (this.currentUser) {
       return this.currentUser;
@@ -461,6 +465,42 @@ export class GitLabService {
     }
     
     return this.applyClientSideFilters(allMergeRequests, filters);
+  }
+
+  async getMergeRequestsForProjects(
+    projectIds: number[],
+    filters: FilterOptions = {},
+    signal?: AbortSignal
+  ): Promise<GitLabMergeRequest[]> {
+    const uniqueProjectIds = [...new Set(projectIds)];
+    const results = await Promise.all(
+      uniqueProjectIds.map(async (projectId) => {
+        try {
+          return await this.getMergeRequests(projectId, filters, signal);
+        } catch (error) {
+          if (error instanceof Error && error.message === 'Request cancelled') {
+            throw error;
+          }
+
+          console.warn(`Failed to fetch merge requests for project ${projectId}:`, error);
+          return [];
+        }
+      })
+    );
+
+    const mergeRequestMap = new Map<number, GitLabMergeRequest>();
+    for (const projectMergeRequests of results) {
+      for (const mergeRequest of projectMergeRequests) {
+        const existing = mergeRequestMap.get(mergeRequest.id);
+        if (!existing || new Date(mergeRequest.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
+          mergeRequestMap.set(mergeRequest.id, mergeRequest);
+        }
+      }
+    }
+
+    return Array.from(mergeRequestMap.values()).sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    );
   }
 
   async getAllMergeRequests(filters: FilterOptions = {}, signal?: AbortSignal): Promise<GitLabMergeRequest[]> {
