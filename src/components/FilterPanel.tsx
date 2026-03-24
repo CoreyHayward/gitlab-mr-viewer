@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FilterOptions } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
 import UserMultiSelect from './UserMultiSelect';
@@ -15,6 +15,10 @@ interface FilterPanelProps {
 
 export default function FilterPanel({ filters, onFiltersChange, isExpanded, onToggle, service }: FilterPanelProps) {
   const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
+
+  useEffect(() => {
+    setLocalFilters(filters);
+  }, [filters]);
 
   const handleFilterChange = (key: keyof FilterOptions, value: string | string[] | boolean | undefined) => {
     const newFilters = { ...localFilters, [key]: value };

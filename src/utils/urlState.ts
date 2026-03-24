@@ -1,5 +1,7 @@
 import { FilterOptions } from '@/types/gitlab';
 
+const VALID_APPROVAL_STATES = new Set(['needs-review', 'partially-approved', 'approved']);
+
 export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): string => {
   const params = new URLSearchParams();
   
@@ -9,6 +11,10 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): 
   
   if (filters.state && filters.state !== 'opened') {
     params.set('state', filters.state);
+  }
+
+  if (filters.approvalState) {
+    params.set('approvalState', filters.approvalState);
   }
   
   if (filters.authors && filters.authors.length > 0) {
@@ -57,6 +63,13 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
     const state = searchParams.get('state') as FilterOptions['state'];
     if (['opened', 'closed', 'merged', 'all'].includes(state!)) {
       filters.state = state;
+    }
+  }
+
+  if (searchParams.has('approvalState')) {
+    const approvalState = searchParams.get('approvalState');
+    if (approvalState && VALID_APPROVAL_STATES.has(approvalState)) {
+      filters.approvalState = approvalState as FilterOptions['approvalState'];
     }
   }
   

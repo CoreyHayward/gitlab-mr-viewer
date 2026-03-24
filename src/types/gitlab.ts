@@ -1,3 +1,5 @@
+export type ApprovalFilterState = 'needs-review' | 'partially-approved' | 'approved';
+
 export interface GitLabProject {
   id: number;
   name: string;
@@ -17,6 +19,17 @@ export interface GitLabUser {
   name: string;
   username: string;
   avatar_url: string;
+}
+
+export interface GitLabApproval {
+  user: GitLabUser;
+  approved_at: string | null;
+}
+
+export interface GitLabMergeRequestApprovalStatus {
+  approvals_required: number;
+  approvals_left: number;
+  approved_by: GitLabApproval[];
 }
 
 export interface GitLabMergeRequest {
@@ -61,10 +74,12 @@ export interface GitLabMergeRequest {
     sha: string;
     web_url: string;
   };
+  approval_status?: GitLabMergeRequestApprovalStatus;
 }
 
 export interface FilterOptions {
   state?: 'opened' | 'closed' | 'merged' | 'all';
+  approvalState?: ApprovalFilterState;
   authors?: string[];
   title?: string;
   excludeTitle?: string;

@@ -22,6 +22,7 @@ export default function HomeContent() {
   const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
   
   const abortControllerRef = useRef<AbortController | null>(null);
+  const approvalAbortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize UI state from localStorage
   useEffect(() => {
@@ -40,12 +41,42 @@ export default function HomeContent() {
     }
   }, []);
 
+  const hydrateApprovalStatuses = useCallback(async (mergeRequestList: GitLabMergeRequest[]) => {
+    if (!service) return;
+
+    if (approvalAbortControllerRef.current) {
+      approvalAbortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    approvalAbortControllerRef.current = controller;
+
+    try {
+      const enrichedMergeRequests = await service.enrichMergeRequestsWithApprovalStatus(mergeRequestList, controller.signal);
+
+      if (!controller.signal.aborted) {
+        setMergeRequests(enrichedMergeRequests);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Request cancelled') {
+        return;
+      }
+
+      console.warn('Failed to hydrate approval statuses:', error);
+    }
+  }, [service]);
+
+  const shouldHydrateApprovalStatuses = (currentFilters: FilterOptions) => !currentFilters.approvalState;
+
   const loadAllMergeRequests = useCallback(async (currentFilters: FilterOptions) => {
     if (!service) return;
 
     // Cancel any pending request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+    }
+    if (approvalAbortControllerRef.current) {
+      approvalAbortControllerRef.current.abort();
     }
 
     // Create new AbortController for this request
@@ -65,6 +96,9 @@ export default function HomeContent() {
       // Only update state if this request wasn't cancelled
       if (!controller.signal.aborted) {
         setMergeRequests(mrs);
+        if (shouldHydrateApprovalStatuses(currentFilters)) {
+          void hydrateApprovalStatuses(mrs);
+        }
       }
     } catch (err) {
       // Don't show errors for cancelled requests
@@ -78,6 +112,7 @@ export default function HomeContent() {
       
       // Check if this is just the initial load without specific filters
       const hasSpecificFilters = currentFilters.authors?.length || 
+                                currentFilters.approvalState ||
                                 currentFilters.title ||
                                 currentFilters.dateFrom || 
                                 currentFilters.dateTo;
@@ -112,7 +147,7 @@ export default function HomeContent() {
         setLoading(false);
       }
     }
-  }, [service]);
+  }, [service, hydrateApprovalStatuses]);
 
   const loadMergeRequests = useCallback(async (project: GitLabProject, currentFilters: FilterOptions) => {
     if (!service) return;
@@ -120,6 +155,9 @@ export default function HomeContent() {
     // Cancel any pending request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+    }
+    if (approvalAbortControllerRef.current) {
+      approvalAbortControllerRef.current.abort();
     }
 
     // Create new AbortController for this request
@@ -135,6 +173,9 @@ export default function HomeContent() {
       // Only update state if this request wasn't cancelled
       if (!controller.signal.aborted) {
         setMergeRequests(mrs);
+        if (shouldHydrateApprovalStatuses(currentFilters)) {
+          void hydrateApprovalStatuses(mrs);
+        }
       }
     } catch (err) {
       // Don't show errors for cancelled requests
@@ -151,7 +192,7 @@ export default function HomeContent() {
         setLoading(false);
       }
     }
-  }, [service]);
+  }, [service, hydrateApprovalStatuses]);
 
   // Initialize filters from URL on mount and load all MRs
   useEffect(() => {
@@ -164,6 +205,7 @@ export default function HomeContent() {
     
     // Expand filters if any non-default filters are set
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
+      urlFilters.approvalState ||
       urlFilters.authors?.length || 
       urlFilters.title || 
       urlFilters.excludeTitle ||
@@ -231,7 +273,18 @@ export default function HomeContent() {
     saveUIState({ filtersExpanded: newExpanded });
   };
 
+  const handleNeedsApprovalChipToggle = () => {
+    const newFilters: FilterOptions = {
+      ...filters,
+      approvalState: filters.approvalState === 'needs-review' ? undefined : 'needs-review'
+    };
+
+    handleFiltersChange(newFilters);
+  };
+
   const handleRefresh = () => {
+    service?.clearApprovalCache();
+
     if (selectedProject) {
       loadMergeRequests(selectedProject, filters);
     } else {
@@ -256,6 +309,10 @@ export default function HomeContent() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    if (approvalAbortControllerRef.current) {
+      approvalAbortControllerRef.current.abort();
+      approvalAbortControllerRef.current = null;
+    }
     
     setService(null);
     setSelectedProject(null);
@@ -277,6 +334,9 @@ export default function HomeContent() {
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
+      }
+      if (approvalAbortControllerRef.current) {
+        approvalAbortControllerRef.current.abort();
       }
     };
   }, []);
@@ -362,6 +422,25 @@ export default function HomeContent() {
           </div>
         )}
 
+        {!error && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              onClick={handleNeedsApprovalChipToggle}
+              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                filters.approvalState === 'needs-review'
+                  ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+              }`}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.66 18h16.68a1 1 0 00.87-1.5l-7.5-13a1 1 0 00-1.74 0z" />
+              </svg>
+              Needs approval
+            </button>
+          </div>
+        )}
+
+
         {/* Results Summary */}
         {!loading && !error && (
           <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
@@ -377,6 +456,7 @@ export default function HomeContent() {
               <>
                 {(() => {
                   const hasSpecificFilters = filters.authors?.length || 
+                                            filters.approvalState ||
                                             filters.title ||
                                             filters.dateFrom || 
                                             filters.dateTo;
@@ -406,7 +486,6 @@ export default function HomeContent() {
             )}
           </div>
         )}
-
         {/* Merge Requests List */}
         <MergeRequestList 
           mergeRequests={mergeRequests} 
@@ -415,6 +494,7 @@ export default function HomeContent() {
           loadingMessage={!selectedProject ? 
             ((() => {
               const hasSpecificFilters = filters.authors?.length || 
+                                        filters.approvalState ||
                                         filters.title ||
                                         filters.dateFrom || 
                                         filters.dateTo;

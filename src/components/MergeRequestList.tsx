@@ -1,6 +1,8 @@
 'use client';
 
+import Image from 'next/image';
 import { GitLabMergeRequest } from '@/types/gitlab';
+import { getApprovalCategory } from '@/utils/approvalState';
 
 interface MergeRequestListProps {
   mergeRequests: GitLabMergeRequest[];
@@ -19,6 +21,77 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       minute: '2-digit',
       hour12: false
     });
+  };
+
+  const getApprovalSummary = (mr: GitLabMergeRequest) => {
+    const approvalCategory = getApprovalCategory(mr);
+
+    if (approvalCategory === 'not-open') {
+      return null;
+    }
+
+    const approvalStatus = mr.approval_status;
+    if (approvalCategory === 'loading' || !approvalStatus) {
+      return {
+        tone: 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-neutral-900/50 dark:text-gray-300 dark:border-neutral-700',
+        label: 'Loading review status',
+        detail: 'Fetching approvals from GitLab so approvers are explicit on the card.'
+      };
+    }
+
+    const approvalCount = approvalStatus.approved_by.length;
+    const requiredApprovals = approvalStatus.approvals_required;
+    const approvalsLeft = approvalStatus.approvals_left;
+
+    if (approvalCategory === 'no-approval-required') {
+      if (approvalCount > 0) {
+        return {
+          tone: 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900',
+          label: 'Reviewed and approved',
+          detail: `${approvalCount} teammate approval${approvalCount === 1 ? '' : 's'} recorded.`
+        };
+      }
+
+      return {
+        tone: 'bg-sky-50 text-sky-900 border-sky-200 dark:bg-sky-950/30 dark:text-sky-200 dark:border-sky-900',
+        label: 'No formal approvals required',
+        detail: mr.reviewers.length > 0
+          ? `${mr.reviewers.length} reviewer${mr.reviewers.length === 1 ? '' : 's'} assigned, but there is no approval gate on this MR.`
+          : 'GitLab does not require approvals before this MR can merge.'
+      };
+    }
+
+    if (approvalCategory === 'approved') {
+      return {
+        tone: 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900',
+        label: 'Ready on approvals',
+        detail: `${approvalCount} of ${requiredApprovals} required approval${requiredApprovals === 1 ? '' : 's'} recorded.`
+      };
+    }
+
+    if (approvalCategory === 'partially-approved') {
+      return {
+        tone: 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-100 dark:border-amber-900',
+        label: `${approvalsLeft} approval${approvalsLeft === 1 ? '' : 's'} still needed`,
+        detail: `${approvalCount} of ${requiredApprovals} required approval${requiredApprovals === 1 ? '' : 's'} already recorded.`
+      };
+    }
+
+    return {
+      tone: 'bg-rose-50 text-rose-900 border-rose-200 dark:bg-rose-950/30 dark:text-rose-100 dark:border-rose-900',
+      label: `${requiredApprovals} approval${requiredApprovals === 1 ? '' : 's'} required`,
+      detail: 'No one has approved this MR yet.'
+    };
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map((part) => part[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('')
+      .toUpperCase();
   };
 
   const getStateColor = (state: string) => {
@@ -179,13 +252,13 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       {mergeRequests.map((mr) => (
         <div
           key={mr.id}
-          className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-lg shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-neutral-600 transition-all duration-200 overflow-hidden group"
+          className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-neutral-600 transition-all duration-200 overflow-hidden group"
         >
           {/* Header */}
-          <div className="p-4">
-            <div className="flex items-start justify-between mb-3">
+          <div className="p-5">
+            <div className="flex items-start justify-between gap-4 mb-3">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2 mb-2">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
                   <a
                     href={mr.web_url}
                     target="_blank"
@@ -201,7 +274,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                   )}
                 </div>
                 
-                <div className="flex items-center space-x-3 text-sm text-gray-500 dark:text-gray-400">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
                   <span className="font-medium">#{mr.iid}</span>
                   {showProjectInfo && mr.project && (
                     <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs font-medium">
@@ -225,7 +298,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                 </div>
               </div>
               
-              <div className="flex items-center space-x-2 ml-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 max-w-xs">
                 {mr.pipeline && (
                   <div className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full border ${getPipelineColor(mr.pipeline.status)}`}>
                     {getPipelineIcon(mr.pipeline.status)}
@@ -239,8 +312,71 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
               </div>
             </div>
 
+            {(() => {
+              const approvalSummary = getApprovalSummary(mr);
+
+              if (!approvalSummary) {
+                return null;
+              }
+
+              return (
+                <div className={`mb-4 rounded-xl border px-4 py-3 ${approvalSummary.tone}`}>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-70">
+                        Review Status
+                      </div>
+                      <div className="mt-1 text-sm font-semibold">
+                        {approvalSummary.label}
+                      </div>
+                      <div className="mt-1 text-xs opacity-80">
+                        {approvalSummary.detail}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      {mr.approval_status && mr.approval_status.approved_by.length > 0 ? (
+                        mr.approval_status.approved_by.slice(0, 3).map(({ user }) => (
+                          <div
+                            key={user.id}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/50 bg-white/70 px-2.5 py-1 text-xs font-medium text-current shadow-sm dark:border-white/10 dark:bg-black/10"
+                            title={`Approved by ${user.name}`}
+                          >
+                            {user.avatar_url ? (
+                              <Image
+                                src={user.avatar_url}
+                                alt={user.name}
+                                width={20}
+                                height={20}
+                                className="h-5 w-5 rounded-full object-cover"
+                              />
+                            ) : (
+                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px] font-bold uppercase dark:bg-white/10">
+                                {getInitials(user.name)}
+                              </span>
+                            )}
+                            <span>{user.name}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="inline-flex items-center rounded-full border border-dashed border-current/30 px-2.5 py-1 text-xs font-medium opacity-80">
+                          No approvals yet
+                        </div>
+                      )}
+
+                      {mr.approval_status && mr.approval_status.approved_by.length > 3 && (
+                        <div className="inline-flex items-center rounded-full border border-current/20 px-2.5 py-1 text-xs font-medium opacity-80">
+                          +{mr.approval_status.approved_by.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Branch Info - Compact */}
-            <div className="flex items-center space-x-2 mb-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
               <span className="font-mono text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
                 {mr.source_branch}
               </span>
@@ -253,29 +389,19 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
             </div>
 
             {/* Compact Meta Row */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 dark:text-gray-400">
                 {mr.assignees.length > 0 && (
-                  <div className="flex items-center space-x-1">
+                  <div className="flex items-center gap-1">
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                     </svg>
-                    <span className="text-xs">{mr.assignees.map(a => a.name).join(', ')}</span>
-                  </div>
-                )}
-
-                {mr.reviewers.length > 0 && (
-                  <div className="flex items-center space-x-1">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                      <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-xs">{mr.reviewers.map(r => r.name).join(', ')}</span>
+                    <span className="text-xs"><span className="font-semibold text-gray-700 dark:text-gray-300">Assignees:</span> {mr.assignees.map(a => a.name).join(', ')}</span>
                   </div>
                 )}
 
                 {mr.user_notes_count > 0 && (
-                  <div className="flex items-center space-x-1">
+                  <div className="flex items-center gap-1">
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" />
                     </svg>
@@ -307,7 +433,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
               {/* Labels - Compact */}
               {mr.labels.length > 0 && (
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {mr.labels.slice(0, 3).map((label) => (
                     <span
                       key={label}

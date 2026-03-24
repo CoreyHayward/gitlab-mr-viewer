@@ -1,10 +1,21 @@
-import { GitLabProject, GitLabMergeRequest, GitLabUser, GitLabGroup, FilterOptions } from '@/types/gitlab';
+import {
+  GitLabProject,
+  GitLabMergeRequest,
+  GitLabMergeRequestApprovalStatus,
+  GitLabUser,
+  GitLabGroup,
+  FilterOptions
+} from '@/types/gitlab';
+import { matchesApprovalFilter } from '@/utils/approvalState';
 
 export class GitLabService {
   private baseUrl: string;
   private token: string;
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
   private readonly CACHE_KEY = 'gitlab-project-cache';
+  private readonly APPROVAL_CACHE_DURATION = 5 * 60 * 1000;
+  private readonly APPROVAL_BATCH_SIZE = 8;
+  private approvalCache = new Map<string, { status: GitLabMergeRequestApprovalStatus; timestamp: number }>();
 
   constructor(instanceUrl: string, token: string) {
     this.baseUrl = instanceUrl.endsWith('/') ? instanceUrl.slice(0, -1) : instanceUrl;
@@ -180,6 +191,10 @@ export class GitLabService {
     }
   }
 
+  clearApprovalCache(): void {
+    this.approvalCache.clear();
+  }
+
   // Method to get cache status (useful for debugging)
   getProjectCacheStatus(): { size: number; entries: Array<{ id: number; name: string; age: string }> } {
     try {
@@ -207,6 +222,136 @@ export class GitLabService {
       endpoint += `&search=${encodeURIComponent(search)}`;
     }
     return this.makeRequest<GitLabProject[]>(endpoint, 30000, signal);
+  }
+
+  private getApprovalCacheKey(projectId: number, mergeRequestIid: number): string {
+    return `${projectId}:${mergeRequestIid}`;
+  }
+
+  private applyClientSideFilters(mergeRequests: GitLabMergeRequest[], filters: FilterOptions): GitLabMergeRequest[] {
+    return mergeRequests.filter((mr) => {
+      if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
+        return false;
+      }
+
+      if (filters.excludeTitle && mr.title.toLowerCase().includes(filters.excludeTitle.toLowerCase())) {
+        return false;
+      }
+
+      if (filters.draft !== undefined && mr.draft !== filters.draft) {
+        return false;
+      }
+
+      if (filters.approvalState && !matchesApprovalFilter(mr.approval_status, filters.approvalState, mr.state)) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  private getCachedApprovalStatus(projectId: number, mergeRequestIid: number): GitLabMergeRequestApprovalStatus | null {
+    const cacheKey = this.getApprovalCacheKey(projectId, mergeRequestIid);
+    const cached = this.approvalCache.get(cacheKey);
+
+    if (!cached) {
+      return null;
+    }
+
+    if (Date.now() - cached.timestamp >= this.APPROVAL_CACHE_DURATION) {
+      this.approvalCache.delete(cacheKey);
+      return null;
+    }
+
+    return cached.status;
+  }
+
+  private async getMergeRequestApprovalStatus(
+    projectId: number,
+    mergeRequestIid: number,
+    signal?: AbortSignal,
+    bypassCache: boolean = false
+  ): Promise<GitLabMergeRequestApprovalStatus> {
+    const cached = bypassCache ? null : this.getCachedApprovalStatus(projectId, mergeRequestIid);
+    if (cached) {
+      return cached;
+    }
+
+    const approvalStatus = await this.makeRequest<GitLabMergeRequestApprovalStatus>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}/approvals`,
+      5000,
+      signal
+    );
+
+    this.approvalCache.set(this.getApprovalCacheKey(projectId, mergeRequestIid), {
+      status: approvalStatus,
+      timestamp: Date.now()
+    });
+
+    return approvalStatus;
+  }
+
+  async enrichMergeRequestsWithApprovalStatus(
+    mergeRequests: GitLabMergeRequest[],
+    signal?: AbortSignal,
+    bypassCache: boolean = false
+  ): Promise<GitLabMergeRequest[]> {
+    const approvalTargets = mergeRequests.filter((mergeRequest) => mergeRequest.state === 'opened');
+
+    if (approvalTargets.length === 0) {
+      return mergeRequests;
+    }
+
+    const approvalStatusMap = new Map<number, GitLabMergeRequestApprovalStatus>();
+
+    for (let index = 0; index < approvalTargets.length; index += this.APPROVAL_BATCH_SIZE) {
+      if (signal?.aborted) {
+        throw new Error('Request cancelled');
+      }
+
+      const batch = approvalTargets.slice(index, index + this.APPROVAL_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (mergeRequest) => {
+          const approvalStatus = await this.getMergeRequestApprovalStatus(
+            mergeRequest.project_id,
+            mergeRequest.iid,
+            signal,
+            bypassCache
+          );
+
+          return {
+            mergeRequestId: mergeRequest.id,
+            approvalStatus
+          };
+        })
+      );
+
+      results.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          approvalStatusMap.set(result.value.mergeRequestId, result.value.approvalStatus);
+          return;
+        }
+
+        if (result.reason instanceof Error && result.reason.message === 'Request cancelled') {
+          return;
+        }
+
+        console.warn('Failed to load merge request approval status:', result.reason);
+      });
+    }
+
+    return mergeRequests.map((mergeRequest) => {
+      const approvalStatus = approvalStatusMap.get(mergeRequest.id);
+
+      if (!approvalStatus) {
+        return mergeRequest;
+      }
+
+      return {
+        ...mergeRequest,
+        approval_status: approvalStatus
+      };
+    });
   }
 
   async getMergeRequests(
@@ -285,28 +430,18 @@ export class GitLabService {
     
     // Enrich merge requests with project information
     allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
+
+    if (filters.approvalState) {
+      allMergeRequests = await this.enrichMergeRequestsWithApprovalStatus(allMergeRequests, signal, true);
+    }
     
-    // Apply client-side filters only
-    return allMergeRequests.filter(mr => {
-      if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
-        return false;
-      }
-      
-      if (filters.excludeTitle && mr.title.toLowerCase().includes(filters.excludeTitle.toLowerCase())) {
-        return false;
-      }
-      
-      if (filters.draft !== undefined && mr.draft !== filters.draft) {
-        return false;
-      }
-      
-      return true;
-    });
+    return this.applyClientSideFilters(allMergeRequests, filters);
   }
 
   async getAllMergeRequests(filters: FilterOptions = {}, signal?: AbortSignal): Promise<GitLabMergeRequest[]> {
     // Determine if we have specific filters early
     const hasSpecificFilters = filters.authors?.length || 
+                              filters.approvalState ||
                               filters.title ||
                               filters.dateFrom || 
                               filters.dateTo;
@@ -401,30 +536,12 @@ export class GitLabService {
     
     // Enrich merge requests with project information in parallel
     allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
-    
-    // Apply client-side filters only (no need to re-sort, already sorted above)
-    return allMergeRequests.filter(mr => {
-      if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
-        return false;
-      }
-      
-      if (filters.excludeTitle && mr.title.toLowerCase().includes(filters.excludeTitle.toLowerCase())) {
-        return false;
-      }
-      
-      if (filters.draft !== undefined && mr.draft !== filters.draft) {
-        return false;
-      }
 
-      // Filter by project names/paths if specified
-      if (filters.projects && filters.projects.length > 0) {
-        // We need to get project info to filter by project names
-        // For now, we'll skip this client-side filtering as we don't have project names in the MR response
-        // This would require a separate API call to get project details
-      }
-      
-      return true;
-    });
+    if (filters.approvalState) {
+      allMergeRequests = await this.enrichMergeRequestsWithApprovalStatus(allMergeRequests, signal, true);
+    }
+    
+    return this.applyClientSideFilters(allMergeRequests, filters);
   }
 
   async testConnection(): Promise<{ success: boolean; user?: GitLabUser; error?: string }> {
