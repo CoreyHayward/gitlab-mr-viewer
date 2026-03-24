@@ -106,7 +106,15 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             required
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Create a token at: Settings → Access Tokens → Personal Access Tokens
+            Create a token at:{' '}
+            <a
+              href="https://gitlab.com/-/user_settings/personal_access_tokens"
+              target="_blank"
+              rel="noreferrer"
+              className="text-violet-600 underline hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+            >
+              GitLab Personal Access Tokens
+            </a>
             <br />
             Required scopes: <code className="bg-gray-100 dark:bg-neutral-700 px-1 rounded">api</code>, <code className="bg-gray-100 dark:bg-neutral-700 px-1 rounded">read_user</code>
           </p>
