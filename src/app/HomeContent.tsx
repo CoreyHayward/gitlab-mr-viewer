@@ -6,7 +6,7 @@ import ProjectSelector from '@/components/ProjectSelector';
 import FilterPanel from '@/components/FilterPanel';
 import MergeRequestList from '@/components/MergeRequestList';
 import { GitLabService } from '@/services/gitlab';
-import { GitLabProject, GitLabMergeRequest, FilterOptions } from '@/types/gitlab';
+import { GitLabProject, GitLabMergeRequest, GitLabUser, FilterOptions } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
 
@@ -20,6 +20,7 @@ export default function HomeContent() {
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
+  const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const approvalAbortControllerRef = useRef<AbortController | null>(null);
@@ -66,7 +67,21 @@ export default function HomeContent() {
     }
   }, [service]);
 
-  const shouldHydrateApprovalStatuses = (currentFilters: FilterOptions) => !currentFilters.approvalState;
+  const shouldHydrateApprovalStatuses = (currentFilters: FilterOptions) => !currentFilters.approvalState && !currentFilters.notReviewedByMe;
+
+  useEffect(() => {
+    if (!service) {
+      setCurrentUser(null);
+      return;
+    }
+
+    service.getCurrentUser()
+      .then(setCurrentUser)
+      .catch((userError) => {
+        console.warn('Failed to load current user:', userError);
+        setCurrentUser(null);
+      });
+  }, [service]);
 
   const loadAllMergeRequests = useCallback(async (currentFilters: FilterOptions) => {
     if (!service) return;
@@ -113,6 +128,7 @@ export default function HomeContent() {
       // Check if this is just the initial load without specific filters
       const hasSpecificFilters = currentFilters.authors?.length || 
                                 currentFilters.approvalState ||
+                                currentFilters.notReviewedByMe ||
                                 currentFilters.title ||
                                 currentFilters.dateFrom || 
                                 currentFilters.dateTo;
@@ -206,6 +222,7 @@ export default function HomeContent() {
     // Expand filters if any non-default filters are set
     const hasNonDefaultFilters = urlFilters.state !== 'opened' || 
       urlFilters.approvalState ||
+      urlFilters.notReviewedByMe ||
       urlFilters.authors?.length || 
       urlFilters.title || 
       urlFilters.excludeTitle ||
@@ -282,6 +299,15 @@ export default function HomeContent() {
     handleFiltersChange(newFilters);
   };
 
+  const handleNotReviewedByMeChipToggle = () => {
+    const newFilters: FilterOptions = {
+      ...filters,
+      notReviewedByMe: filters.notReviewedByMe ? undefined : true
+    };
+
+    handleFiltersChange(newFilters);
+  };
+
   const handleRefresh = () => {
     service?.clearApprovalCache();
 
@@ -318,6 +344,7 @@ export default function HomeContent() {
     setSelectedProject(null);
     setMergeRequests([]);
     setError(null);
+    setCurrentUser(null);
     setUrlProjectId(undefined);
     setFilters({ state: 'opened' });
     localStorage.removeItem('gitlab-instance-url');
@@ -437,6 +464,23 @@ export default function HomeContent() {
               </svg>
               Needs approval
             </button>
+
+
+            <button
+              onClick={handleNotReviewedByMeChipToggle}
+              disabled={!currentUser}
+              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                filters.notReviewedByMe
+                  ? 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+              } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
+              title={currentUser ? `Show merge requests not approved by @${currentUser.username}` : 'Loading current user'}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9a3 3 0 11-6 0 3 3 0 016 0zm-9 3a3 3 0 11-6 0 3 3 0 016 0zm9 9v-1a4 4 0 00-4-4h-1m-8 5v-1a4 4 0 014-4h1m0 0a3 3 0 013 3v1m-3-4a3 3 0 00-3 3v1" />
+              </svg>
+              Not reviewed by me
+            </button>
           </div>
         )}
 
@@ -457,6 +501,7 @@ export default function HomeContent() {
                 {(() => {
                   const hasSpecificFilters = filters.authors?.length || 
                                             filters.approvalState ||
+                                            filters.notReviewedByMe ||
                                             filters.title ||
                                             filters.dateFrom || 
                                             filters.dateTo;
@@ -495,6 +540,7 @@ export default function HomeContent() {
             ((() => {
               const hasSpecificFilters = filters.authors?.length || 
                                         filters.approvalState ||
+                                        filters.notReviewedByMe ||
                                         filters.title ||
                                         filters.dateFrom || 
                                         filters.dateTo;

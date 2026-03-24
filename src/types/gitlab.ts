@@ -80,6 +80,7 @@ export interface GitLabMergeRequest {
 export interface FilterOptions {
   state?: 'opened' | 'closed' | 'merged' | 'all';
   approvalState?: ApprovalFilterState;
+  notReviewedByMe?: boolean;
   authors?: string[];
   title?: string;
   excludeTitle?: string;

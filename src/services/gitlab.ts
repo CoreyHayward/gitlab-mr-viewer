@@ -11,6 +11,7 @@ import { matchesApprovalFilter } from '@/utils/approvalState';
 export class GitLabService {
   private baseUrl: string;
   private token: string;
+  private currentUser: GitLabUser | null = null;
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
   private readonly CACHE_KEY = 'gitlab-project-cache';
   private readonly APPROVAL_CACHE_DURATION = 5 * 60 * 1000;
@@ -224,6 +225,16 @@ export class GitLabService {
     return this.makeRequest<GitLabProject[]>(endpoint, 30000, signal);
   }
 
+  async getCurrentUser(signal?: AbortSignal): Promise<GitLabUser> {
+    if (this.currentUser) {
+      return this.currentUser;
+    }
+
+    const user = await this.makeRequest<GitLabUser>('/user', 30000, signal);
+    this.currentUser = user;
+    return user;
+  }
+
   private getApprovalCacheKey(projectId: number, mergeRequestIid: number): string {
     return `${projectId}:${mergeRequestIid}`;
   }
@@ -244,6 +255,17 @@ export class GitLabService {
 
       if (filters.approvalState && !matchesApprovalFilter(mr.approval_status, filters.approvalState, mr.state)) {
         return false;
+      }
+
+      if (filters.notReviewedByMe) {
+        if (mr.state !== 'opened' || !mr.approval_status || !this.currentUser) {
+          return false;
+        }
+
+        const approvedByCurrentUser = mr.approval_status.approved_by.some(({ user }) => user.username === this.currentUser?.username);
+        if (approvedByCurrentUser) {
+          return false;
+        }
       }
 
       return true;
@@ -431,7 +453,10 @@ export class GitLabService {
     // Enrich merge requests with project information
     allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
 
-    if (filters.approvalState) {
+    if (filters.approvalState || filters.notReviewedByMe) {
+      if (filters.notReviewedByMe) {
+        await this.getCurrentUser(signal);
+      }
       allMergeRequests = await this.enrichMergeRequestsWithApprovalStatus(allMergeRequests, signal, true);
     }
     
@@ -442,6 +467,7 @@ export class GitLabService {
     // Determine if we have specific filters early
     const hasSpecificFilters = filters.authors?.length || 
                               filters.approvalState ||
+                              filters.notReviewedByMe ||
                               filters.title ||
                               filters.dateFrom || 
                               filters.dateTo;
@@ -537,7 +563,10 @@ export class GitLabService {
     // Enrich merge requests with project information in parallel
     allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
 
-    if (filters.approvalState) {
+    if (filters.approvalState || filters.notReviewedByMe) {
+      if (filters.notReviewedByMe) {
+        await this.getCurrentUser(signal);
+      }
       allMergeRequests = await this.enrichMergeRequestsWithApprovalStatus(allMergeRequests, signal, true);
     }
     
@@ -547,6 +576,7 @@ export class GitLabService {
   async testConnection(): Promise<{ success: boolean; user?: GitLabUser; error?: string }> {
     try {
       const user = await this.makeRequest<GitLabUser>('/user');
+      this.currentUser = user;
       return { success: true, user };
     } catch (error) {
       return { 

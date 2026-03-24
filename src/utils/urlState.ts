@@ -16,6 +16,10 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectId?: number): 
   if (filters.approvalState) {
     params.set('approvalState', filters.approvalState);
   }
+
+  if (filters.notReviewedByMe) {
+    params.set('notReviewedByMe', 'true');
+  }
   
   if (filters.authors && filters.authors.length > 0) {
     params.set('authors', filters.authors.join(','));
@@ -71,6 +75,10 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
     if (approvalState && VALID_APPROVAL_STATES.has(approvalState)) {
       filters.approvalState = approvalState as FilterOptions['approvalState'];
     }
+  }
+
+  if (searchParams.has('notReviewedByMe')) {
+    filters.notReviewedByMe = searchParams.get('notReviewedByMe') === 'true';
   }
   
   if (searchParams.has('authors')) {
