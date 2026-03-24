@@ -10,6 +10,8 @@ import { GitLabProject, GitLabMergeRequest, GitLabUser, FilterOptions } from '@/
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
 
+type QuickFilterOverride = 'my-open-prs';
+
 export default function HomeContent() {
   const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
   const [service, setService] = useState<GitLabService | null>(null);
@@ -21,6 +23,7 @@ export default function HomeContent() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [urlProjectId, setUrlProjectId] = useState<number | undefined>();
   const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
+  const [quickFilterOverride, setQuickFilterOverride] = useState<QuickFilterOverride | null>(null);
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const approvalAbortControllerRef = useRef<AbortController | null>(null);
@@ -68,6 +71,10 @@ export default function HomeContent() {
   }, [service]);
 
   const shouldHydrateApprovalStatuses = (currentFilters: FilterOptions) => !currentFilters.approvalState && !currentFilters.notReviewedByMe;
+
+  const effectiveFilters: FilterOptions = quickFilterOverride === 'my-open-prs' && currentUser
+    ? { state: 'opened', authors: [currentUser.username] }
+    : filters;
 
   useEffect(() => {
     if (!service) {
@@ -266,15 +273,16 @@ export default function HomeContent() {
   const handleProjectSelect = (project: GitLabProject | null) => {
     setSelectedProject(project);
     if (project) {
-      updateURL(filters, project.id);
-      loadMergeRequests(project, filters);
+      updateURL(effectiveFilters, project.id);
+      loadMergeRequests(project, effectiveFilters);
     } else {
-      updateURL(filters, undefined);
-      loadAllMergeRequests(filters);
+      updateURL(effectiveFilters, undefined);
+      loadAllMergeRequests(effectiveFilters);
     }
   };
 
   const handleFiltersChange = (newFilters: FilterOptions) => {
+    setQuickFilterOverride(null);
     setFilters(newFilters);
     updateURL(newFilters, selectedProject?.id);
     if (selectedProject) {
@@ -308,13 +316,33 @@ export default function HomeContent() {
     handleFiltersChange(newFilters);
   };
 
+  const handleMyOpenPrsChipToggle = () => {
+    if (!currentUser) {
+      return;
+    }
+
+    const nextOverride = quickFilterOverride === 'my-open-prs' ? null : 'my-open-prs';
+    const nextFilters: FilterOptions = nextOverride === 'my-open-prs'
+      ? { state: 'opened', authors: [currentUser.username] }
+      : filters;
+
+    setQuickFilterOverride(nextOverride);
+    updateURL(nextFilters, selectedProject?.id);
+
+    if (selectedProject) {
+      loadMergeRequests(selectedProject, nextFilters);
+    } else {
+      loadAllMergeRequests(nextFilters);
+    }
+  };
+
   const handleRefresh = () => {
     service?.clearApprovalCache();
 
     if (selectedProject) {
-      loadMergeRequests(selectedProject, filters);
+      loadMergeRequests(selectedProject, effectiveFilters);
     } else {
-      loadAllMergeRequests(filters);
+      loadAllMergeRequests(effectiveFilters);
     }
   };
 
@@ -345,6 +373,7 @@ export default function HomeContent() {
     setMergeRequests([]);
     setError(null);
     setCurrentUser(null);
+    setQuickFilterOverride(null);
     setUrlProjectId(undefined);
     setFilters({ state: 'opened' });
     localStorage.removeItem('gitlab-instance-url');
@@ -449,8 +478,25 @@ export default function HomeContent() {
           </div>
         )}
 
+        {/* Quick Filter Chips */}
         {!error && (
           <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              onClick={handleMyOpenPrsChipToggle}
+              disabled={!currentUser}
+              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                quickFilterOverride === 'my-open-prs'
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+              } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
+              title={currentUser ? `Show only open merge requests authored by @${currentUser.username}` : 'Loading current user'}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              My Open PRs
+            </button>
+
             <button
               onClick={handleNeedsApprovalChipToggle}
               className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -492,19 +538,19 @@ export default function HomeContent() {
               <>
                 Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
                 {' '}in <strong>{selectedProject.path_with_namespace}</strong>
-                {filters.authors && filters.authors.length > 0 && (
-                  <span> by {filters.authors.join(', ')}</span>
+                {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
+                  <span> by {effectiveFilters.authors.join(', ')}</span>
                 )}
               </>
             ) : (
               <>
                 {(() => {
-                  const hasSpecificFilters = filters.authors?.length || 
-                                            filters.approvalState ||
-                                            filters.notReviewedByMe ||
-                                            filters.title ||
-                                            filters.dateFrom || 
-                                            filters.dateTo;
+                  const hasSpecificFilters = effectiveFilters.authors?.length || 
+                                            effectiveFilters.approvalState ||
+                                            effectiveFilters.notReviewedByMe ||
+                                            effectiveFilters.title ||
+                                            effectiveFilters.dateFrom || 
+                                            effectiveFilters.dateTo;
                   
                   if (!hasSpecificFilters) {
                     return (
@@ -520,8 +566,8 @@ export default function HomeContent() {
                     return (
                       <>
                         Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects
-                        {filters.authors && filters.authors.length > 0 && (
-                          <span> by {filters.authors.join(', ')}</span>
+                        {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
+                          <span> by {effectiveFilters.authors.join(', ')}</span>
                         )}
                       </>
                     );
@@ -538,12 +584,12 @@ export default function HomeContent() {
           showProjectInfo={!selectedProject}
           loadingMessage={!selectedProject ? 
             ((() => {
-              const hasSpecificFilters = filters.authors?.length || 
-                                        filters.approvalState ||
-                                        filters.notReviewedByMe ||
-                                        filters.title ||
-                                        filters.dateFrom || 
-                                        filters.dateTo;
+              const hasSpecificFilters = effectiveFilters.authors?.length || 
+                                        effectiveFilters.approvalState ||
+                                        effectiveFilters.notReviewedByMe ||
+                                        effectiveFilters.title ||
+                                        effectiveFilters.dateFrom || 
+                                        effectiveFilters.dateTo;
               
               return hasSpecificFilters ? 
                 "Searching merge requests across all projects..." : 
