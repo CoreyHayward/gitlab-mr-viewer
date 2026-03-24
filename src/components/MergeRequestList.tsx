@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { GitLabMergeRequest } from '@/types/gitlab';
 import { getApprovalCategory } from '@/utils/approvalState';
 
@@ -23,6 +22,25 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     });
   };
 
+  const formatRelativeTime = (dateString: string) => {
+    const timestamp = new Date(dateString).getTime();
+    const diffMs = timestamp - Date.now();
+    const diffMinutes = Math.round(diffMs / (1000 * 60));
+    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+    const ranges = [
+      { limit: 60, value: diffMinutes, unit: 'minute' as const },
+      { limit: 60 * 24, value: Math.round(diffMinutes / 60), unit: 'hour' as const },
+      { limit: 60 * 24 * 30, value: Math.round(diffMinutes / (60 * 24)), unit: 'day' as const },
+      { limit: 60 * 24 * 365, value: Math.round(diffMinutes / (60 * 24 * 30)), unit: 'month' as const },
+      { limit: Number.POSITIVE_INFINITY, value: Math.round(diffMinutes / (60 * 24 * 365)), unit: 'year' as const }
+    ];
+
+    const selectedRange = ranges.find((range) => Math.abs(diffMinutes) < range.limit) ?? ranges[ranges.length - 1];
+
+    return formatter.format(selectedRange.value, selectedRange.unit);
+  };
+
   const getApprovalSummary = (mr: GitLabMergeRequest) => {
     const approvalCategory = getApprovalCategory(mr);
 
@@ -34,6 +52,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     if (approvalCategory === 'loading' || !approvalStatus) {
       return {
         tone: 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-neutral-900/50 dark:text-gray-300 dark:border-neutral-700',
+        chipLabel: 'Review loading',
         label: 'Loading review status',
         detail: 'Fetching approvals from GitLab so approvers are explicit on the card.'
       };
@@ -47,6 +66,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       if (approvalCount > 0) {
         return {
           tone: 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900',
+          chipLabel: 'Approved',
           label: 'Reviewed and approved',
           detail: `${approvalCount} teammate approval${approvalCount === 1 ? '' : 's'} recorded.`
         };
@@ -54,6 +74,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
       return {
         tone: 'bg-sky-50 text-sky-900 border-sky-200 dark:bg-sky-950/30 dark:text-sky-200 dark:border-sky-900',
+        chipLabel: 'No approval gate',
         label: 'No formal approvals required',
         detail: mr.reviewers.length > 0
           ? `${mr.reviewers.length} reviewer${mr.reviewers.length === 1 ? '' : 's'} assigned, but there is no approval gate on this MR.`
@@ -64,6 +85,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     if (approvalCategory === 'approved') {
       return {
         tone: 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900',
+        chipLabel: 'Approved',
         label: 'Ready on approvals',
         detail: `${approvalCount} of ${requiredApprovals} required approval${requiredApprovals === 1 ? '' : 's'} recorded.`
       };
@@ -72,6 +94,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     if (approvalCategory === 'partially-approved') {
       return {
         tone: 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-100 dark:border-amber-900',
+        chipLabel: `${approvalsLeft} left`,
         label: `${approvalsLeft} approval${approvalsLeft === 1 ? '' : 's'} still needed`,
         detail: `${approvalCount} of ${requiredApprovals} required approval${requiredApprovals === 1 ? '' : 's'} already recorded.`
       };
@@ -79,19 +102,10 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
     return {
       tone: 'bg-rose-50 text-rose-900 border-rose-200 dark:bg-rose-950/30 dark:text-rose-100 dark:border-rose-900',
+      chipLabel: `${requiredApprovals} required`,
       label: `${requiredApprovals} approval${requiredApprovals === 1 ? '' : 's'} required`,
       detail: 'No one has approved this MR yet.'
     };
-  };
-
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map((part) => part[0])
-      .filter(Boolean)
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
   };
 
   const getStateColor = (state: string) => {
@@ -104,6 +118,20 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
         return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:border-gray-700';
+    }
+  };
+
+  const getMergeStatusColor = (status: string) => {
+    switch (status) {
+      case 'ci_must_pass':
+      case 'not_approved':
+      case 'draft_status':
+        return 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-900';
+      case 'cannot_be_merged':
+      case 'conflict':
+        return 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/30 dark:text-rose-200 dark:border-rose-900';
+      default:
+        return 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-neutral-900/50 dark:text-gray-300 dark:border-neutral-700';
     }
   };
 
@@ -183,6 +211,13 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     }
   };
 
+  const getVisiblePeople = (names: string[], maxVisible = 2) => {
+    return {
+      visible: names.slice(0, maxVisible),
+      remaining: Math.max(names.length - maxVisible, 0)
+    };
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -250,40 +285,56 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
   return (
     <div className="space-y-3">
       {mergeRequests.map((mr) => (
-        <div
-          key={mr.id}
-          className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-neutral-600 transition-all duration-200 overflow-hidden group"
-        >
-          {/* Header */}
-          <div className="p-5">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <a
-                    href={mr.web_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-base font-semibold text-gray-900 dark:text-white hover:text-violet-600 dark:hover:text-violet-400 transition-colors group-hover:text-violet-600 dark:group-hover:text-violet-400 line-clamp-2 pr-2"
-                  >
-                    {mr.title}
-                  </a>
+        (() => {
+          const reviewSummary = getApprovalSummary(mr);
+
+          return (
+            <div
+              key={mr.id}
+              className="group overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:border-gray-300 hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 dark:hover:border-neutral-600"
+            >
+              <div className="p-4">
+                <div className="flex flex-col gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+                  {mr.state === 'opened' && reviewSummary ? (
+                    <div
+                      className={`inline-flex cursor-default items-center rounded-full border px-2.5 py-1 ${reviewSummary.tone}`}
+                      title={`${reviewSummary.label}. ${reviewSummary.detail}`}
+                    >
+                      <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-4a1 1 0 00-.894.553l-2 4A1 1 0 008 12h4a1 1 0 00.894-1.447l-2-4A1 1 0 0010 6zm0 7a1.25 1.25 0 100 2.5A1.25 1.25 0 0010 13z" clipRule="evenodd" />
+                      </svg>
+                      <span className="ml-1">{reviewSummary.chipLabel}</span>
+                    </div>
+                  ) : (
+                    <div className={`inline-flex items-center rounded-full border px-2.5 py-1 ${getStateColor(mr.state)}`}>
+                      {getStateIcon(mr.state)}
+                      <span className="ml-1 capitalize">{mr.state}</span>
+                    </div>
+                  )}
+
+                  {mr.pipeline && (
+                    <div className={`inline-flex items-center rounded-full border px-2.5 py-1 ${getPipelineColor(mr.pipeline.status)}`}>
+                      {getPipelineIcon(mr.pipeline.status)}
+                      <span className="ml-1 capitalize">Pipeline {mr.pipeline.status}</span>
+                    </div>
+                  )}
+
                   {mr.draft && (
-                    <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800 rounded-full">
-                      DRAFT
+                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
+                      Draft
                     </span>
                   )}
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
-                  <span className="font-medium">#{mr.iid}</span>
+
                   {showProjectInfo && mr.project && (
-                    <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs font-medium">
+                    <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700 dark:border-neutral-700 dark:bg-neutral-900/50 dark:text-gray-300">
                       {mr.project.web_url ? (
                         <a
                           href={mr.project.web_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="hover:text-violet-600 dark:hover:text-violet-400 transition-colors"
+                          className="transition-colors hover:text-violet-600 dark:hover:text-violet-400"
                         >
                           {mr.project.name}
                         </a>
@@ -292,178 +343,149 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                       )}
                     </span>
                   )}
-                  <span>by <span className="font-medium text-gray-700 dark:text-gray-300">{mr.author.name}</span></span>
-                  <span>created {formatDate(mr.created_at)}</span>
-                  <span>updated {formatDate(mr.updated_at)}</span>
                 </div>
-              </div>
-              
-              <div className="flex flex-wrap items-center justify-end gap-2 max-w-xs">
-                {mr.pipeline && (
-                  <div className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full border ${getPipelineColor(mr.pipeline.status)}`}>
-                    {getPipelineIcon(mr.pipeline.status)}
-                    <span className="ml-1 capitalize">{mr.pipeline.status}</span>
-                  </div>
-                )}
-                <div className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${getStateColor(mr.state)}`}>
-                  {getStateIcon(mr.state)}
-                  <span className="ml-1 capitalize">{mr.state}</span>
-                </div>
-              </div>
-            </div>
 
-            {(() => {
-              const approvalSummary = getApprovalSummary(mr);
+                <div className="flex flex-col gap-1.5">
+                  <a
+                    href={mr.web_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="pr-2 text-base font-semibold leading-6 text-gray-900 transition-colors hover:text-violet-600 group-hover:text-violet-600 dark:text-white dark:hover:text-violet-400 dark:group-hover:text-violet-400"
+                  >
+                    {mr.title}
+                  </a>
 
-              if (!approvalSummary) {
-                return null;
-              }
-
-              return (
-                <div className={`mb-4 rounded-xl border px-4 py-3 ${approvalSummary.tone}`}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-70">
-                        Review Status
-                      </div>
-                      <div className="mt-1 text-sm font-semibold">
-                        {approvalSummary.label}
-                      </div>
-                      <div className="mt-1 text-xs opacity-80">
-                        {approvalSummary.detail}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 lg:justify-end">
-                      {mr.approval_status && mr.approval_status.approved_by.length > 0 ? (
-                        mr.approval_status.approved_by.slice(0, 3).map(({ user }) => (
-                          <div
-                            key={user.id}
-                            className="inline-flex items-center gap-2 rounded-full border border-white/50 bg-white/70 px-2.5 py-1 text-xs font-medium text-current shadow-sm dark:border-white/10 dark:bg-black/10"
-                            title={`Approved by ${user.name}`}
-                          >
-                            {user.avatar_url ? (
-                              <Image
-                                src={user.avatar_url}
-                                alt={user.name}
-                                width={20}
-                                height={20}
-                                className="h-5 w-5 rounded-full object-cover"
-                              />
-                            ) : (
-                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/10 text-[10px] font-bold uppercase dark:bg-white/10">
-                                {getInitials(user.name)}
-                              </span>
-                            )}
-                            <span>{user.name}</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="inline-flex items-center rounded-full border border-dashed border-current/30 px-2.5 py-1 text-xs font-medium opacity-80">
-                          No approvals yet
-                        </div>
-                      )}
-
-                      {mr.approval_status && mr.approval_status.approved_by.length > 3 && (
-                        <div className="inline-flex items-center rounded-full border border-current/20 px-2.5 py-1 text-xs font-medium opacity-80">
-                          +{mr.approval_status.approved_by.length - 3} more
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Branch Info - Compact */}
-            <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
-              <span className="font-mono text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
-                {mr.source_branch}
-              </span>
-              <svg className="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-              <span className="font-mono text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">
-                {mr.target_branch}
-              </span>
-            </div>
-
-            {/* Compact Meta Row */}
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 dark:text-gray-400">
-                {mr.assignees.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-xs"><span className="font-semibold text-gray-700 dark:text-gray-300">Assignees:</span> {mr.assignees.map(a => a.name).join(', ')}</span>
-                  </div>
-                )}
-
-                {mr.user_notes_count > 0 && (
-                  <div className="flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-xs font-medium">{mr.user_notes_count}</span>
-                  </div>
-                )}
-
-                {(mr.upvotes > 0 || mr.downvotes > 0) && (
-                  <div className="flex items-center space-x-2">
-                    {mr.upvotes > 0 && (
-                      <div className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
-                        </svg>
-                        <span className="text-xs font-medium">{mr.upvotes}</span>
-                      </div>
-                    )}
-                    {mr.downvotes > 0 && (
-                      <div className="flex items-center space-x-1 text-red-600 dark:text-red-400">
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M18 9.5a1.5 1.5 0 11-3 0v-6a1.5 1.5 0 013 0v6zM14 9.667v-5.43a2 2 0 00-1.106-1.79l-.05-.025A4 4 0 0011.057 2H5.64a2 2 0 00-1.962 1.608l-1.2 6A2 2 0 004.44 12H8v4a2 2 0 002 2 1 1 0 001-1v-.667a4 4 0 01.8-2.4l1.4-1.866a4 4 0 00.8-2.4z" />
-                        </svg>
-                        <span className="text-xs font-medium">{mr.downvotes}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Labels - Compact */}
-              {mr.labels.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {mr.labels.slice(0, 3).map((label) => (
-                    <span
-                      key={label}
-                      className="inline-flex items-center px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"
-                    >
-                      {label}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
+                    <span className="font-semibold text-gray-700 dark:text-gray-200">#{mr.iid}</span>
+                    <span>
+                      Author <span className="font-medium text-gray-700 dark:text-gray-200">{mr.author.name}</span>
                     </span>
-                  ))}
-                  {mr.labels.length > 3 && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded">
-                      +{mr.labels.length - 3}
+                    <span title={formatDate(mr.updated_at)}>Updated {formatRelativeTime(mr.updated_at)}</span>
+                    <span title={formatDate(mr.created_at)}>Created {formatRelativeTime(mr.created_at)}</span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-900/60 dark:text-gray-300">
+                      <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" />
+                      </svg>
+                      {mr.user_notes_count}
                     </span>
-                  )}
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* Merge Status - Only show if not mergeable */}
-            {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && (
-              <div className="mt-2 flex items-center">
-                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800 rounded-full">
-                  <svg className="w-3 h-3 mr-1 text-amber-600 dark:text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 text-sm text-gray-600 dark:border-neutral-700/70 dark:text-gray-400">
+              <div className="inline-flex min-w-0 items-center gap-2 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M3 5a2 2 0 012-2h4a1 1 0 010 2H5v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm9.293-1.707a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-6 6A1 1 0 019 14H6a1 1 0 01-1-1v-3a1 1 0 01.293-.707l6-6z" clipRule="evenodd" />
+                </svg>
+                <span className="truncate rounded-md bg-white px-2 py-0.5 font-mono text-xs text-gray-700 shadow-sm dark:bg-neutral-800 dark:text-gray-300">
+                  {mr.source_branch}
+                </span>
+                <svg className="h-3 w-3 shrink-0 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+                <span className="truncate rounded-md bg-white px-2 py-0.5 font-mono text-xs text-gray-700 shadow-sm dark:bg-neutral-800 dark:text-gray-300">
+                  {mr.target_branch}
+                </span>
+              </div>
+
+              {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && (
+                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${getMergeStatusColor(mr.detailed_merge_status)}`}>
+                  <svg className="mr-1 h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                   </svg>
                   {mr.detailed_merge_status.replace(/_/g, ' ')}
                 </span>
+              )}
+
+              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                </svg>
+                {mr.assignees.length > 0 ? (
+                  <div className="flex min-w-0 flex-wrap gap-1">
+                    {(() => {
+                      const { visible, remaining } = getVisiblePeople(mr.assignees.map((assignee) => assignee.name));
+
+                      return (
+                        <>
+                          {visible.map((name) => (
+                            <span key={name} className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-800 dark:text-gray-300">
+                              {name}
+                            </span>
+                          ))}
+                          {remaining > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-neutral-800 dark:text-gray-400">
+                              +{remaining}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Unassigned</span>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+
+              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 3C5.455 3 1.73 5.916.458 10c1.272 4.084 4.997 7 9.542 7s8.27-2.916 9.542-7c-1.272-4.084-4.997-7-9.542-7zm0 11a4 4 0 110-8 4 4 0 010 8z" />
+                  <path d="M10 8a2 2 0 100 4 2 2 0 000-4z" />
+                </svg>
+                {mr.reviewers.length > 0 ? (
+                  <div className="flex min-w-0 flex-wrap gap-1">
+                    {(() => {
+                      const { visible, remaining } = getVisiblePeople(mr.reviewers.map((reviewer) => reviewer.name));
+
+                      return (
+                        <>
+                          {visible.map((name) => (
+                            <span key={name} className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-800 dark:text-gray-300">
+                              {name}
+                            </span>
+                          ))}
+                          {remaining > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-neutral-800 dark:text-gray-400">
+                              +{remaining}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">No reviewers</span>
+                )}
+              </div>
+
+              {mr.labels.length > 0 && (
+                <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+                  <svg className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 7a2 2 0 012-2h4.586a2 2 0 011.414.586l5.414 5.414a2 2 0 010 2.828l-3.172 3.172a2 2 0 01-2.828 0L5.414 11.586A2 2 0 014.828 10V7zm4 1a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                  </svg>
+                  <div className="flex min-w-0 flex-wrap gap-1">
+                    {mr.labels.slice(0, 3).map((label) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-800 dark:text-gray-300"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                    {mr.labels.length > 3 && (
+                      <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-neutral-800 dark:text-gray-400">
+                        +{mr.labels.length - 3}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+              </div>
+            </div>
+          );
+        })()
       ))}
     </div>
   );
