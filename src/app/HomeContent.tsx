@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import ConfigForm from '@/components/ConfigForm';
+import ConfigForm, { clearAllStoredCredentials } from '@/components/ConfigForm';
 import ProjectSelector from '@/components/ProjectSelector';
 import FilterPanel from '@/components/FilterPanel';
 import MergeRequestList from '@/components/MergeRequestList';
@@ -390,8 +390,7 @@ export default function HomeContent() {
     setQuickFilterOverride(null);
     setUrlProjectIds([]);
     setFilters({ state: 'opened' });
-    localStorage.removeItem('gitlab-instance-url');
-    localStorage.removeItem('gitlab-token');
+    clearAllStoredCredentials();
     
     // Clear URL parameters
     const url = new URL(window.location.href);

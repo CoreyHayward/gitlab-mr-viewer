@@ -7,22 +7,61 @@ interface ConfigFormProps {
   onConfigured: (service: GitLabService) => void;
 }
 
+const TOKEN_EXPIRY_DAYS = 30;
+
+const STORAGE_KEYS = {
+  TOKEN: 'gitlab-token',
+  INSTANCE_URL: 'gitlab-instance-url',
+  TOKEN_EXPIRY: 'gitlab-token-expiry',
+} as const;
+
+export function clearAllStoredCredentials() {
+  sessionStorage.removeItem(STORAGE_KEYS.TOKEN);
+  sessionStorage.removeItem(STORAGE_KEYS.INSTANCE_URL);
+  localStorage.removeItem(STORAGE_KEYS.TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.INSTANCE_URL);
+  localStorage.removeItem(STORAGE_KEYS.TOKEN_EXPIRY);
+}
+
+function loadStoredCredentials(): { instanceUrl: string | null; token: string | null } {
+  // Prefer sessionStorage (current session only, cleared when the tab is closed)
+  const sessionToken = sessionStorage.getItem(STORAGE_KEYS.TOKEN);
+  const sessionInstanceUrl = sessionStorage.getItem(STORAGE_KEYS.INSTANCE_URL);
+  if (sessionToken) {
+    return { token: sessionToken, instanceUrl: sessionInstanceUrl };
+  }
+
+  // Fall back to localStorage (remembered across sessions), but respect expiry
+  const expiry = localStorage.getItem(STORAGE_KEYS.TOKEN_EXPIRY);
+  if (expiry && Date.now() > parseInt(expiry, 10)) {
+    // Token has expired — clear it and treat as unauthenticated
+    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.INSTANCE_URL);
+    localStorage.removeItem(STORAGE_KEYS.TOKEN_EXPIRY);
+    return { token: null, instanceUrl: null };
+  }
+
+  return {
+    token: localStorage.getItem(STORAGE_KEYS.TOKEN),
+    instanceUrl: localStorage.getItem(STORAGE_KEYS.INSTANCE_URL),
+  };
+}
+
 export default function ConfigForm({ onConfigured }: ConfigFormProps) {
   const [instanceUrl, setInstanceUrl] = useState('https://gitlab.com');
   const [token, setToken] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(false);
 
   // Load saved credentials on component mount
   useEffect(() => {
-    const savedInstanceUrl = localStorage.getItem('gitlab-instance-url');
-    const savedToken = localStorage.getItem('gitlab-token');
-    
+    const { token: savedToken, instanceUrl: savedInstanceUrl } = loadStoredCredentials();
+
     if (savedInstanceUrl) {
       setInstanceUrl(savedInstanceUrl);
     }
-    
+
     if (savedToken) {
       setToken(savedToken);
       // Auto-connect if we have saved credentials
@@ -32,8 +71,8 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
           onConfigured(service);
         }
       }).catch(() => {
-        // If auto-connect fails, clear saved token and let user re-enter
-        localStorage.removeItem('gitlab-token');
+        // If auto-connect fails, clear all saved credentials and let user re-enter
+        clearAllStoredCredentials();
         setToken('');
       });
     }
@@ -49,14 +88,25 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
       const result = await service.testConnection();
       
       if (result.success) {
-        // Save credentials to localStorage if remember me is checked
         if (rememberMe) {
-          localStorage.setItem('gitlab-instance-url', instanceUrl);
-          localStorage.setItem('gitlab-token', token);
+          // Store in localStorage so credentials persist across browser sessions
+          localStorage.setItem(STORAGE_KEYS.INSTANCE_URL, instanceUrl);
+          localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+          localStorage.setItem(
+            STORAGE_KEYS.TOKEN_EXPIRY,
+            (Date.now() + TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toString()
+          );
+          // Avoid duplication in sessionStorage
+          sessionStorage.removeItem(STORAGE_KEYS.INSTANCE_URL);
+          sessionStorage.removeItem(STORAGE_KEYS.TOKEN);
         } else {
-          // Clear saved credentials if user unchecked remember me
-          localStorage.removeItem('gitlab-instance-url');
-          localStorage.removeItem('gitlab-token');
+          // Store in sessionStorage only — cleared automatically when the tab closes
+          sessionStorage.setItem(STORAGE_KEYS.INSTANCE_URL, instanceUrl);
+          sessionStorage.setItem(STORAGE_KEYS.TOKEN, token);
+          // Remove any previously remembered credentials
+          localStorage.removeItem(STORAGE_KEYS.INSTANCE_URL);
+          localStorage.removeItem(STORAGE_KEYS.TOKEN);
+          localStorage.removeItem(STORAGE_KEYS.TOKEN_EXPIRY);
         }
         
         onConfigured(service);
@@ -129,7 +179,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
             className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
           />
           <label htmlFor="rememberMe" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-            Remember my credentials (stored in browser local storage)
+            Remember my credentials across sessions (stored in local storage for {TOKEN_EXPIRY_DAYS} days)
           </label>
         </div>
 
@@ -153,10 +203,11 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
           🔒 Privacy & Security
         </h3>
         <ul className="text-xs text-slate-700 dark:text-neutral-400 space-y-1">
-          <li>• Your token is stored only in your browser (memory or local storage if you choose &quot;Remember me&quot;)</li>
+          <li>• Your token is stored in session storage by default — cleared automatically when you close this tab</li>
+          <li>• Checking &quot;Remember me&quot; stores the token in local storage for {TOKEN_EXPIRY_DAYS} days so you stay connected across browser sessions</li>
           <li>• All API calls are made directly from your browser to GitLab</li>
           <li>• No data is sent to or stored on our servers</li>
-          <li>• Refresh the page to clear your token from memory (or clear your local storage if you choose &quot;Remember me&quot;)</li>
+          <li>• Use the &quot;Disconnect&quot; button to clear all stored credentials at any time</li>
         </ul>
       </div>
     </div>
