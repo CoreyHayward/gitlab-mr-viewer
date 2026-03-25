@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { GitLabProject } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
 import { loadUIState, saveUIState } from '@/utils/uiState';
+import { ChevronDown, X, Check } from 'lucide-react';
 
 interface ProjectSelectorProps {
   service: GitLabService;
@@ -187,14 +188,9 @@ export default function ProjectSelector({ service, selectedProjects, onProjectsC
                 : `${selectedProjects.length} selected`}
             </div>
           </div>
-          <svg
+          <ChevronDown
             className={`w-5 h-5 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          />
         </button>
 
         {selectedProjects.length > 0 && (
@@ -210,9 +206,7 @@ export default function ProjectSelector({ service, selectedProjects, onProjectsC
                   className="ml-2 text-violet-600 dark:text-violet-300 hover:text-violet-800 dark:hover:text-violet-100"
                   aria-label={`Remove ${project.path_with_namespace}`}
                 >
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
+                  <X className="w-3 h-3" />
                 </button>
               </span>
             ))}
@@ -283,9 +277,7 @@ export default function ProjectSelector({ service, selectedProjects, onProjectsC
                             ? 'border-violet-500 bg-violet-500 text-white'
                             : 'border-gray-300 dark:border-neutral-600 text-transparent'
                         }`}>
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
+                          <Check className="w-3.5 h-3.5" />
                         </div>
                       </div>
                     </button>

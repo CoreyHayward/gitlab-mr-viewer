@@ -2,6 +2,7 @@
 
 import { GitLabMergeRequest } from '@/types/gitlab';
 import { getApprovalCategory } from '@/utils/approvalState';
+import { CircleCheck, Check, X, Loader2, Clock, Info, MessageSquare, GitBranch, ArrowRight, TriangleAlert, User, Eye, Tag, FileText } from 'lucide-react';
 
 interface MergeRequestListProps {
   mergeRequests: GitLabMergeRequest[];
@@ -138,23 +139,11 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
   const getStateIcon = (state: string) => {
     switch (state) {
       case 'opened':
-        return (
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-        );
+        return <CircleCheck className="w-4 h-4" />;
       case 'merged':
-        return (
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-        );
+        return <Check className="w-4 h-4" />;
       case 'closed':
-        return (
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-          </svg>
-        );
+        return <X className="w-4 h-4" />;
       default:
         return null;
     }
@@ -178,36 +167,15 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
   const getPipelineIcon = (status: string) => {
     switch (status) {
       case 'success':
-        return (
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-        );
+        return <Check className="w-3 h-3" />;
       case 'failed':
-        return (
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-          </svg>
-        );
+        return <X className="w-3 h-3" />;
       case 'running':
-        return (
-          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
-        );
+        return <Loader2 className="w-3 h-3 animate-spin" />;
       case 'pending':
-        return (
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-          </svg>
-        );
+        return <Clock className="w-3 h-3" />;
       default:
-        return (
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-          </svg>
-        );
+        return <Info className="w-3 h-3" />;
     }
   };
 
@@ -224,10 +192,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
         {loadingMessage && (
           <div className="text-center py-8">
             <div className="inline-flex items-center space-x-3 px-6 py-4 bg-violet-50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 rounded-xl">
-              <svg className="animate-spin w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-              </svg>
+              <Loader2 className="animate-spin w-5 h-5 text-violet-500" />
               <span className="text-violet-700 dark:text-violet-300 font-medium">
                 {loadingMessage}
               </span>
@@ -268,9 +233,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     return (
       <div className="text-center py-16">
         <div className="mx-auto w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-6">
-          <svg className="w-12 h-12 text-gray-400 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
+          <FileText className="w-12 h-12 text-gray-400 dark:text-gray-600" />
         </div>
         <div className="text-gray-900 dark:text-white text-xl font-semibold mb-2">
           No merge requests found
@@ -302,9 +265,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                       className={`inline-flex cursor-default items-center rounded-full border px-2.5 py-1 ${reviewSummary.tone}`}
                       title={`${reviewSummary.label}. ${reviewSummary.detail}`}
                     >
-                      <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-4a1 1 0 00-.894.553l-2 4A1 1 0 008 12h4a1 1 0 00.894-1.447l-2-4A1 1 0 0010 6zm0 7a1.25 1.25 0 100 2.5A1.25 1.25 0 0010 13z" clipRule="evenodd" />
-                      </svg>
+                      <Info className="h-3.5 w-3.5" />
                       <span className="ml-1">{reviewSummary.chipLabel}</span>
                     </div>
                   ) : (
@@ -363,9 +324,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                     <span title={formatDate(mr.updated_at)}>Updated {formatRelativeTime(mr.updated_at)}</span>
                     <span title={formatDate(mr.created_at)}>Created {formatRelativeTime(mr.created_at)}</span>
                     <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-900/60 dark:text-gray-300">
-                      <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" />
-                      </svg>
+                      <MessageSquare className="h-3 w-3" />
                       {mr.user_notes_count}
                     </span>
                   </div>
@@ -375,15 +334,11 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 text-sm text-gray-600 dark:border-neutral-700/70 dark:text-gray-400">
               <div className="inline-flex min-w-0 items-center gap-2 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
-                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M3 5a2 2 0 012-2h4a1 1 0 010 2H5v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm9.293-1.707a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-6 6A1 1 0 019 14H6a1 1 0 01-1-1v-3a1 1 0 01.293-.707l6-6z" clipRule="evenodd" />
-                </svg>
+                <GitBranch className="h-3.5 w-3.5 shrink-0 text-gray-400" />
                 <span className="truncate rounded-md bg-white px-2 py-0.5 font-mono text-xs text-gray-700 shadow-sm dark:bg-neutral-800 dark:text-gray-300">
                   {mr.source_branch}
                 </span>
-                <svg className="h-3 w-3 shrink-0 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
+                <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
                 <span className="truncate rounded-md bg-white px-2 py-0.5 font-mono text-xs text-gray-700 shadow-sm dark:bg-neutral-800 dark:text-gray-300">
                   {mr.target_branch}
                 </span>
@@ -391,17 +346,13 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
               {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && (
                 <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${getMergeStatusColor(mr.detailed_merge_status)}`}>
-                  <svg className="mr-1 h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
+                  <TriangleAlert className="mr-1 h-3 w-3" />
                   {mr.detailed_merge_status.replace(/_/g, ' ')}
                 </span>
               )}
 
               <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
-                <svg className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                </svg>
+                <User className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
                 {mr.assignees.length > 0 ? (
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {(() => {
@@ -429,10 +380,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
               </div>
 
               <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
-                <svg className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M10 3C5.455 3 1.73 5.916.458 10c1.272 4.084 4.997 7 9.542 7s8.27-2.916 9.542-7c-1.272-4.084-4.997-7-9.542-7zm0 11a4 4 0 110-8 4 4 0 010 8z" />
-                  <path d="M10 8a2 2 0 100 4 2 2 0 000-4z" />
-                </svg>
+                <Eye className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
                 {mr.reviewers.length > 0 ? (
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {(() => {
@@ -461,9 +409,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
 
               {mr.labels.length > 0 && (
                 <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
-                  <svg className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M3 7a2 2 0 012-2h4.586a2 2 0 011.414.586l5.414 5.414a2 2 0 010 2.828l-3.172 3.172a2 2 0 01-2.828 0L5.414 11.586A2 2 0 014.828 10V7zm4 1a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                  </svg>
+                  <Tag className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {mr.labels.slice(0, 3).map((label) => (
                       <span
