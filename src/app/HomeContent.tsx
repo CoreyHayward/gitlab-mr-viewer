@@ -9,6 +9,7 @@ import { GitLabService } from '@/services/gitlab';
 import { GitLabProject, GitLabMergeRequest, GitLabUser, FilterOptions } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
+import { Link, Link2, LogOut, RefreshCcw } from 'lucide-react';
 
 type QuickFilterOverride = 'my-open-prs';
 
@@ -447,9 +448,7 @@ export default function HomeContent() {
               disabled={loading}
               className={primaryActionClassName}
             >
-              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992V4.356m-1.873 2.122a8.25 8.25 0 11-2.132-1.519" />
-              </svg>
+              <RefreshCcw className="h-4 w-4" />
               {loading ? 'Refreshing...' : 'Refresh'}
             </button>
             {selectedProjects.length > 0 && (
@@ -457,9 +456,7 @@ export default function HomeContent() {
                 onClick={handleShareURL}
                 className={secondaryActionClassName}
               >
-                <svg className="h-4 w-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 13a5 5 0 007.07 0l1.41-1.41a5 5 0 10-7.07-7.07L10.5 5.43m3 5.57a5 5 0 00-7.07 0l-1.41 1.41a5 5 0 107.07 7.07L13.5 18.57" />
-                </svg>
+                <Link className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 Share URL
               </button>
             )}
@@ -467,9 +464,7 @@ export default function HomeContent() {
               onClick={handleDisconnect}
               className={secondaryActionClassName}
             >
-              <svg className="h-4 w-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
+              <LogOut className="h-4 w-4 text-gray-500 dark:text-gray-400" />
               Disconnect
             </button>
           </div>
