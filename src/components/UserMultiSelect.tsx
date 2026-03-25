@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { GitLabUser } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
+import { X, User, ChevronDown, Loader2, Search, Plus } from 'lucide-react';
 
 interface UserMultiSelectProps {
   service: GitLabService;
@@ -136,9 +137,7 @@ export default function UserMultiSelect({
                   onClick={() => handleRemoveUser(user.username)}
                   className="ml-2 p-0.5 text-slate-600 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-neutral-200 hover:bg-slate-200 dark:hover:bg-neutral-800 rounded-full transition-colors"
                 >
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
+                  <X className="w-3 h-3" />
                 </button>
               </span>
             ))}
@@ -155,9 +154,7 @@ export default function UserMultiSelect({
                     onClick={() => handleRemoveUser(username)}
                     className="ml-2 p-0.5 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition-colors"
                   >
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
+                    <X className="w-3 h-3" />
                   </button>
                 </span>
               ))}
@@ -167,9 +164,7 @@ export default function UserMultiSelect({
         {/* Search input */}
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
+            <User className="w-4 h-4 text-gray-400" />
           </div>
           <input
             type="text"
@@ -180,14 +175,9 @@ export default function UserMultiSelect({
             className="w-full pl-10 pr-10 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
           />
           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-            <svg
+            <ChevronDown
               className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+            />
           </div>
         </div>
 
@@ -197,10 +187,7 @@ export default function UserMultiSelect({
             {loading ? (
               <div className="p-4 text-center">
                 <div className="inline-flex items-center space-x-2 text-gray-500 dark:text-gray-400">
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                  </svg>
+                  <Loader2 className="animate-spin w-4 h-4" />
                   <span className="text-sm">Loading users...</span>
                 </div>
               </div>
@@ -209,16 +196,12 @@ export default function UserMultiSelect({
                 <div className="text-gray-500 dark:text-gray-400 text-sm">
                   {searchTerm ? (
                     <>
-                      <svg className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
+                      <Search className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                       No users found matching &ldquo;{searchTerm}&rdquo;
                     </>
                   ) : (
                     <>
-                      <svg className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
+                      <User className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                       Start typing to search users
                     </>
                   )}
@@ -255,9 +238,7 @@ export default function UserMultiSelect({
                         </div>
                       </div>
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                        <svg className="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                        </svg>
+                        <Plus className="w-4 h-4 text-violet-500" />
                       </div>
                     </div>
                   </button>
