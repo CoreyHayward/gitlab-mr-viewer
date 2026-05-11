@@ -2,6 +2,7 @@ import {
   GitLabProject,
   GitLabMergeRequest,
   GitLabMergeRequestApprovalStatus,
+  GitLabMergeRequestDiffStats,
   GitLabUser,
   GitLabGroup,
   FilterOptions
@@ -17,6 +18,9 @@ export class GitLabService {
   private readonly APPROVAL_CACHE_DURATION = 5 * 60 * 1000;
   private readonly APPROVAL_BATCH_SIZE = 8;
   private approvalCache = new Map<string, { status: GitLabMergeRequestApprovalStatus; timestamp: number }>();
+  private readonly DIFF_STATS_CACHE_DURATION = 5 * 60 * 1000;
+  private readonly DIFF_STATS_PROJECT_BATCH_SIZE = 4;
+  private diffStatsCache = new Map<string, { stats: GitLabMergeRequestDiffStats; timestamp: number }>();
 
   constructor(instanceUrl: string, token: string) {
     this.baseUrl = instanceUrl.endsWith('/') ? instanceUrl.slice(0, -1) : instanceUrl;
@@ -194,6 +198,185 @@ export class GitLabService {
 
   clearApprovalCache(): void {
     this.approvalCache.clear();
+  }
+
+  clearDiffStatsCache(): void {
+    this.diffStatsCache.clear();
+  }
+
+  private async makeGraphQLRequest<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    timeout: number = 10000,
+    externalSignal?: AbortSignal
+  ): Promise<T> {
+    const url = `${this.baseUrl}/api/graphql`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    const abortHandler = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        clearTimeout(timeoutId);
+        throw new Error('Request cancelled');
+      }
+      externalSignal.addEventListener('abort', abortHandler);
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+
+      if (!response.ok) {
+        throw new Error(`GitLab GraphQL error: ${response.status} ${response.statusText}`);
+      }
+
+      const json = await response.json();
+      if (json.errors) {
+        throw new Error(`GitLab GraphQL error: ${JSON.stringify(json.errors)}`);
+      }
+      return json.data as T;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+
+      if (error instanceof Error && error.name === 'AbortError') {
+        if (externalSignal?.aborted) {
+          throw new Error('Request cancelled');
+        }
+        throw new Error('GraphQL request timed out');
+      }
+      throw error;
+    }
+  }
+
+  private getDiffStatsCacheKey(projectId: number, mergeRequestIid: number): string {
+    return `${projectId}:${mergeRequestIid}`;
+  }
+
+  private getCachedDiffStats(projectId: number, mergeRequestIid: number): GitLabMergeRequestDiffStats | null {
+    const cacheKey = this.getDiffStatsCacheKey(projectId, mergeRequestIid);
+    const cached = this.diffStatsCache.get(cacheKey);
+    if (!cached) {
+      return null;
+    }
+    if (Date.now() - cached.timestamp >= this.DIFF_STATS_CACHE_DURATION) {
+      this.diffStatsCache.delete(cacheKey);
+      return null;
+    }
+    return cached.stats;
+  }
+
+  private async fetchDiffStatsForProject(
+    fullPath: string,
+    iids: number[],
+    signal?: AbortSignal
+  ): Promise<Map<number, GitLabMergeRequestDiffStats>> {
+    const query = `query DiffStats($fullPath: ID!, $iids: [String!]!) {
+      project(fullPath: $fullPath) {
+        mergeRequests(iids: $iids) {
+          nodes {
+            iid
+            diffStatsSummary {
+              additions
+              deletions
+              fileCount
+            }
+          }
+        }
+      }
+    }`;
+
+    const data = await this.makeGraphQLRequest<{
+      project?: {
+        mergeRequests?: {
+          nodes: Array<{
+            iid: string;
+            diffStatsSummary?: { additions: number; deletions: number; fileCount: number } | null;
+          }>;
+        } | null;
+      } | null;
+    }>(query, { fullPath, iids: iids.map(String) }, 8000, signal);
+
+    const result = new Map<number, GitLabMergeRequestDiffStats>();
+    const nodes = data?.project?.mergeRequests?.nodes ?? [];
+    for (const node of nodes) {
+      if (!node.diffStatsSummary) continue;
+      result.set(Number(node.iid), {
+        additions: node.diffStatsSummary.additions,
+        deletions: node.diffStatsSummary.deletions,
+        file_count: node.diffStatsSummary.fileCount
+      });
+    }
+    return result;
+  }
+
+  async enrichMergeRequestsWithDiffStats(
+    mergeRequests: GitLabMergeRequest[],
+    signal?: AbortSignal,
+    bypassCache: boolean = false
+  ): Promise<GitLabMergeRequest[]> {
+    const groups = new Map<string, GitLabMergeRequest[]>();
+    for (const mr of mergeRequests) {
+      const fullPath = mr.project?.path_with_namespace;
+      if (!fullPath) continue;
+      if (!bypassCache && this.getCachedDiffStats(mr.project_id, mr.iid)) continue;
+
+      const list = groups.get(fullPath) ?? [];
+      list.push(mr);
+      groups.set(fullPath, list);
+    }
+
+    const projectEntries = Array.from(groups.entries());
+    for (let i = 0; i < projectEntries.length; i += this.DIFF_STATS_PROJECT_BATCH_SIZE) {
+      if (signal?.aborted) {
+        throw new Error('Request cancelled');
+      }
+      const slice = projectEntries.slice(i, i + this.DIFF_STATS_PROJECT_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        slice.map(async ([fullPath, mrs]) => {
+          const stats = await this.fetchDiffStatsForProject(fullPath, mrs.map((mr) => mr.iid), signal);
+          for (const mr of mrs) {
+            const stat = stats.get(mr.iid);
+            if (stat) {
+              this.diffStatsCache.set(this.getDiffStatsCacheKey(mr.project_id, mr.iid), {
+                stats: stat,
+                timestamp: Date.now()
+              });
+            }
+          }
+        })
+      );
+
+      results.forEach((result) => {
+        if (result.status === 'rejected') {
+          if (result.reason instanceof Error && result.reason.message === 'Request cancelled') {
+            return;
+          }
+          console.warn('Failed to load merge request diff stats:', result.reason);
+        }
+      });
+    }
+
+    return mergeRequests.map((mr) => {
+      const stats = this.getCachedDiffStats(mr.project_id, mr.iid);
+      if (!stats) return mr;
+      return { ...mr, diff_stats: stats };
+    });
   }
 
   // Method to get cache status (useful for debugging)

@@ -179,6 +179,35 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     }
   };
 
+  const getSizeBadge = (mr: GitLabMergeRequest) => {
+    if (!mr.diff_stats) return null;
+    const { additions, deletions, file_count } = mr.diff_stats;
+    const total = additions + deletions;
+
+    let label: string;
+    let tone: string;
+    if (total < 10) {
+      label = 'XS';
+      tone = 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900';
+    } else if (total < 100) {
+      label = 'S';
+      tone = 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900';
+    } else if (total < 500) {
+      label = 'M';
+      tone = 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-100 dark:border-amber-900';
+    } else if (total < 1000) {
+      label = 'L';
+      tone = 'bg-orange-50 text-orange-900 border-orange-200 dark:bg-orange-950/30 dark:text-orange-100 dark:border-orange-900';
+    } else {
+      label = 'XL';
+      tone = 'bg-rose-50 text-rose-900 border-rose-200 dark:bg-rose-950/30 dark:text-rose-100 dark:border-rose-900';
+    }
+
+    const title = `${additions} additions, ${deletions} deletions across ${file_count} file${file_count === 1 ? '' : 's'}`;
+
+    return { label, tone, title, additions, deletions };
+  };
+
   const getVisiblePeople = (names: string[], maxVisible = 2) => {
     return {
       visible: names.slice(0, maxVisible),
@@ -250,6 +279,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
       {mergeRequests.map((mr) => (
         (() => {
           const reviewSummary = getApprovalSummary(mr);
+          const sizeBadge = getSizeBadge(mr);
 
           return (
             <div
@@ -285,6 +315,17 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                   {mr.draft && (
                     <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
                       Draft
+                    </span>
+                  )}
+
+                  {sizeBadge && (
+                    <span
+                      className={`inline-flex cursor-default items-center gap-1.5 rounded-full border px-2.5 py-1 ${sizeBadge.tone}`}
+                      title={sizeBadge.title}
+                    >
+                      <span className="font-semibold">{sizeBadge.label}</span>
+                      <span className="text-emerald-700 dark:text-emerald-300">+{sizeBadge.additions}</span>
+                      <span className="text-rose-700 dark:text-rose-300">-{sizeBadge.deletions}</span>
                     </span>
                   )}
 

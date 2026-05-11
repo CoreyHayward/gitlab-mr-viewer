@@ -28,6 +28,7 @@ export default function HomeContent() {
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const approvalAbortControllerRef = useRef<AbortController | null>(null);
+  const diffStatsAbortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize UI state from localStorage
   useEffect(() => {
@@ -60,7 +61,14 @@ export default function HomeContent() {
       const enrichedMergeRequests = await service.enrichMergeRequestsWithApprovalStatus(mergeRequestList, controller.signal);
 
       if (!controller.signal.aborted) {
-        setMergeRequests(enrichedMergeRequests);
+        setMergeRequests((current) => {
+          const approvalsById = new Map(enrichedMergeRequests.map((mr) => [mr.id, mr.approval_status]));
+          return current.map((mr) => {
+            const approvalStatus = approvalsById.get(mr.id);
+            if (!approvalStatus) return mr;
+            return { ...mr, approval_status: approvalStatus };
+          });
+        });
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'Request cancelled') {
@@ -72,6 +80,37 @@ export default function HomeContent() {
   }, [service]);
 
   const shouldHydrateApprovalStatuses = (currentFilters: FilterOptions) => !currentFilters.approvalState && !currentFilters.notReviewedByMe;
+
+  const hydrateDiffStats = useCallback(async (mergeRequestList: GitLabMergeRequest[]) => {
+    if (!service || mergeRequestList.length === 0) return;
+
+    if (diffStatsAbortControllerRef.current) {
+      diffStatsAbortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    diffStatsAbortControllerRef.current = controller;
+
+    try {
+      const enriched = await service.enrichMergeRequestsWithDiffStats(mergeRequestList, controller.signal);
+
+      if (!controller.signal.aborted) {
+        setMergeRequests((current) => {
+          const statsById = new Map(enriched.map((mr) => [mr.id, mr.diff_stats]));
+          return current.map((mr) => {
+            const stats = statsById.get(mr.id);
+            if (!stats) return mr;
+            return { ...mr, diff_stats: stats };
+          });
+        });
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Request cancelled') {
+        return;
+      }
+      console.warn('Failed to hydrate diff stats:', error);
+    }
+  }, [service]);
 
   const effectiveFilters: FilterOptions = quickFilterOverride === 'my-open-prs' && currentUser
     ? { state: 'opened', authors: [currentUser.username] }
@@ -101,6 +140,9 @@ export default function HomeContent() {
     if (approvalAbortControllerRef.current) {
       approvalAbortControllerRef.current.abort();
     }
+    if (diffStatsAbortControllerRef.current) {
+      diffStatsAbortControllerRef.current.abort();
+    }
 
     // Create new AbortController for this request
     const controller = new AbortController();
@@ -122,6 +164,7 @@ export default function HomeContent() {
         if (shouldHydrateApprovalStatuses(currentFilters)) {
           void hydrateApprovalStatuses(mrs);
         }
+        void hydrateDiffStats(mrs);
       }
     } catch (err) {
       // Don't show errors for cancelled requests
@@ -129,7 +172,7 @@ export default function HomeContent() {
         console.log('Request was cancelled');
         return;
       }
-      
+
       console.error('Error loading merge requests:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load merge requests';
       
@@ -171,7 +214,7 @@ export default function HomeContent() {
         setLoading(false);
       }
     }
-  }, [service, hydrateApprovalStatuses]);
+  }, [service, hydrateApprovalStatuses, hydrateDiffStats]);
 
   const loadProjectMergeRequests = useCallback(async (projects: GitLabProject[], currentFilters: FilterOptions) => {
     if (!service || projects.length === 0) return;
@@ -182,6 +225,9 @@ export default function HomeContent() {
     }
     if (approvalAbortControllerRef.current) {
       approvalAbortControllerRef.current.abort();
+    }
+    if (diffStatsAbortControllerRef.current) {
+      diffStatsAbortControllerRef.current.abort();
     }
 
     // Create new AbortController for this request
@@ -206,6 +252,7 @@ export default function HomeContent() {
         if (shouldHydrateApprovalStatuses(currentFilters)) {
           void hydrateApprovalStatuses(mrs);
         }
+        void hydrateDiffStats(mrs);
       }
     } catch (err) {
       // Don't show errors for cancelled requests
@@ -213,7 +260,7 @@ export default function HomeContent() {
         console.log('Request was cancelled');
         return;
       }
-      
+
       setError(err instanceof Error ? err.message : 'Failed to load merge requests');
       setMergeRequests([]);
     } finally {
@@ -222,7 +269,7 @@ export default function HomeContent() {
         setLoading(false);
       }
     }
-  }, [service, hydrateApprovalStatuses]);
+  }, [service, hydrateApprovalStatuses, hydrateDiffStats]);
 
   // Initialize filters from URL on mount and load all MRs
   useEffect(() => {
@@ -353,6 +400,7 @@ export default function HomeContent() {
 
   const handleRefresh = () => {
     service?.clearApprovalCache();
+    service?.clearDiffStatsCache();
 
     if (selectedProjects.length > 0) {
       loadProjectMergeRequests(selectedProjects, effectiveFilters);
@@ -382,7 +430,11 @@ export default function HomeContent() {
       approvalAbortControllerRef.current.abort();
       approvalAbortControllerRef.current = null;
     }
-    
+    if (diffStatsAbortControllerRef.current) {
+      diffStatsAbortControllerRef.current.abort();
+      diffStatsAbortControllerRef.current = null;
+    }
+
     setService(null);
     setSelectedProjects([]);
     setMergeRequests([]);
@@ -411,6 +463,9 @@ export default function HomeContent() {
       }
       if (approvalAbortControllerRef.current) {
         approvalAbortControllerRef.current.abort();
+      }
+      if (diffStatsAbortControllerRef.current) {
+        diffStatsAbortControllerRef.current.abort();
       }
     };
   }, []);

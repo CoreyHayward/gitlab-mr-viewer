@@ -75,6 +75,13 @@ export interface GitLabMergeRequest {
     web_url: string;
   };
   approval_status?: GitLabMergeRequestApprovalStatus;
+  diff_stats?: GitLabMergeRequestDiffStats;
+}
+
+export interface GitLabMergeRequestDiffStats {
+  additions: number;
+  deletions: number;
+  file_count: number;
 }
 
 export interface FilterOptions {
