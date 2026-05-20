@@ -373,13 +373,13 @@ export default function HomeContent() {
   };
 
   const handleFiltersChange = (newFilters: FilterOptions) => {
+    setQuickFilterOverride(null);
     setFilters(newFilters);
-    const nextFilters = applyQuickFilterOverride(newFilters, quickFilterOverride, currentUser);
-    updateURL(nextFilters, selectedProjects.map((project) => project.id));
+    updateURL(newFilters, selectedProjects.map((project) => project.id));
     if (selectedProjects.length > 0) {
-      loadProjectMergeRequests(selectedProjects, nextFilters);
+      loadProjectMergeRequests(selectedProjects, newFilters);
     } else {
-      loadAllMergeRequests(nextFilters);
+      loadAllMergeRequests(newFilters);
     }
   };
 
@@ -649,12 +649,12 @@ export default function HomeContent() {
                   ? 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800'
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
               }`}
-              title="Show recently merged pull requests while keeping your advanced filters"
+              title="Show recently merged merge requests while keeping your advanced filters"
             >
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h6m-6 5h10" />
               </svg>
-              Recently merged PRs
+              Recently merged MRs
             </button>
 
 
