@@ -408,18 +408,10 @@ export default function HomeContent() {
   };
 
   const handleNotReviewedByMeChipToggle = () => {
-    if (!currentUser) {
-      return;
-    }
-
     handleQuickFilterToggle('not-reviewed-by-me');
   };
 
   const handleMyOpenPrsChipToggle = () => {
-    if (!currentUser) {
-      return;
-    }
-
     handleQuickFilterToggle('my-open-prs');
   };
 
