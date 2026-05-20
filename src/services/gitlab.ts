@@ -688,12 +688,20 @@ export class GitLabService {
 
   async getAllMergeRequests(filters: FilterOptions = {}, signal?: AbortSignal): Promise<GitLabMergeRequest[]> {
     // Determine if we have specific filters early
-    const hasSpecificFilters = filters.authors?.length || 
-                              filters.approvalState ||
-                              filters.notReviewedByMe ||
-                              filters.title ||
-                              filters.dateFrom || 
-                              filters.dateTo;
+    const hasSpecificFilters = filters.state === 'closed' ||
+      filters.state === 'merged' ||
+      filters.state === 'all' ||
+      Boolean(
+        filters.authors?.length ||
+        filters.approvalState ||
+        filters.notReviewedByMe ||
+        filters.title ||
+        filters.excludeTitle ||
+        filters.draft !== undefined ||
+        filters.dateFrom ||
+        filters.dateTo ||
+        filters.projects?.length
+      );
     
     const buildParams = (authorUsername?: string): URLSearchParams => {
       const params = new URLSearchParams();

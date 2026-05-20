@@ -11,7 +11,45 @@ import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
 import { Link, Link2, LogOut, RefreshCcw } from 'lucide-react';
 
-type QuickFilterOverride = 'my-open-prs';
+type QuickFilterOverride = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
+
+const hasSpecificFilters = (currentFilters: FilterOptions) => (
+  currentFilters.state === 'closed' ||
+  currentFilters.state === 'merged' ||
+  currentFilters.state === 'all' ||
+  Boolean(
+    currentFilters.authors?.length ||
+    currentFilters.approvalState ||
+    currentFilters.notReviewedByMe ||
+    currentFilters.title ||
+    currentFilters.excludeTitle ||
+    currentFilters.draft !== undefined ||
+    currentFilters.dateFrom ||
+    currentFilters.dateTo ||
+    currentFilters.projects?.length
+  )
+);
+
+const applyQuickFilterOverride = (
+  filters: FilterOptions,
+  quickFilterOverride: QuickFilterOverride | null,
+  currentUser: GitLabUser | null
+): FilterOptions => {
+  switch (quickFilterOverride) {
+    case 'my-open-prs':
+      return currentUser
+        ? { ...filters, state: 'opened', authors: [currentUser.username] }
+        : filters;
+    case 'needs-approval':
+      return { ...filters, approvalState: 'needs-review' };
+    case 'not-reviewed-by-me':
+      return { ...filters, notReviewedByMe: true };
+    case 'recently-merged-prs':
+      return { ...filters, state: 'merged' };
+    default:
+      return filters;
+  }
+};
 
 export default function HomeContent() {
   const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
@@ -112,9 +150,7 @@ export default function HomeContent() {
     }
   }, [service]);
 
-  const effectiveFilters: FilterOptions = quickFilterOverride === 'my-open-prs' && currentUser
-    ? { state: 'opened', authors: [currentUser.username] }
-    : filters;
+  const effectiveFilters: FilterOptions = applyQuickFilterOverride(filters, quickFilterOverride, currentUser);
 
   useEffect(() => {
     if (!service) {
@@ -177,15 +213,8 @@ export default function HomeContent() {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load merge requests';
       
       // Check if this is just the initial load without specific filters
-      const hasSpecificFilters = currentFilters.authors?.length || 
-                                currentFilters.approvalState ||
-                                currentFilters.notReviewedByMe ||
-                                currentFilters.title ||
-                                currentFilters.dateFrom || 
-                                currentFilters.dateTo;
-
       // For initial load without filters, show a gentler message
-      if (!hasSpecificFilters && errorMessage.includes('timed out')) {
+      if (!hasSpecificFilters(currentFilters) && errorMessage.includes('timed out')) {
         setError(
           'Unable to load recent merge requests automatically.\n\n' +
           'This is normal for very large GitLab instances. To view merge requests:\n' +
@@ -344,13 +373,13 @@ export default function HomeContent() {
   };
 
   const handleFiltersChange = (newFilters: FilterOptions) => {
-    setQuickFilterOverride(null);
     setFilters(newFilters);
-    updateURL(newFilters, selectedProjects.map((project) => project.id));
+    const nextFilters = applyQuickFilterOverride(newFilters, quickFilterOverride, currentUser);
+    updateURL(nextFilters, selectedProjects.map((project) => project.id));
     if (selectedProjects.length > 0) {
-      loadProjectMergeRequests(selectedProjects, newFilters);
+      loadProjectMergeRequests(selectedProjects, nextFilters);
     } else {
-      loadAllMergeRequests(newFilters);
+      loadAllMergeRequests(nextFilters);
     }
   };
 
@@ -361,21 +390,35 @@ export default function HomeContent() {
   };
 
   const handleNeedsApprovalChipToggle = () => {
-    const newFilters: FilterOptions = {
-      ...filters,
-      approvalState: filters.approvalState === 'needs-review' ? undefined : 'needs-review'
-    };
+    const nextOverride = quickFilterOverride === 'needs-approval' ? null : 'needs-approval';
+    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
 
-    handleFiltersChange(newFilters);
+    setQuickFilterOverride(nextOverride);
+    updateURL(nextFilters, selectedProjects.map((project) => project.id));
+
+    if (selectedProjects.length > 0) {
+      loadProjectMergeRequests(selectedProjects, nextFilters);
+    } else {
+      loadAllMergeRequests(nextFilters);
+    }
   };
 
   const handleNotReviewedByMeChipToggle = () => {
-    const newFilters: FilterOptions = {
-      ...filters,
-      notReviewedByMe: filters.notReviewedByMe ? undefined : true
-    };
+    if (!currentUser) {
+      return;
+    }
 
-    handleFiltersChange(newFilters);
+    const nextOverride = quickFilterOverride === 'not-reviewed-by-me' ? null : 'not-reviewed-by-me';
+    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
+
+    setQuickFilterOverride(nextOverride);
+    updateURL(nextFilters, selectedProjects.map((project) => project.id));
+
+    if (selectedProjects.length > 0) {
+      loadProjectMergeRequests(selectedProjects, nextFilters);
+    } else {
+      loadAllMergeRequests(nextFilters);
+    }
   };
 
   const handleMyOpenPrsChipToggle = () => {
@@ -384,9 +427,21 @@ export default function HomeContent() {
     }
 
     const nextOverride = quickFilterOverride === 'my-open-prs' ? null : 'my-open-prs';
-    const nextFilters: FilterOptions = nextOverride === 'my-open-prs'
-      ? { state: 'opened', authors: [currentUser.username] }
-      : filters;
+    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
+
+    setQuickFilterOverride(nextOverride);
+    updateURL(nextFilters, selectedProjects.map((project) => project.id));
+
+    if (selectedProjects.length > 0) {
+      loadProjectMergeRequests(selectedProjects, nextFilters);
+    } else {
+      loadAllMergeRequests(nextFilters);
+    }
+  };
+
+  const handleRecentlyMergedChipToggle = () => {
+    const nextOverride = quickFilterOverride === 'recently-merged-prs' ? null : 'recently-merged-prs';
+    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
 
     setQuickFilterOverride(nextOverride);
     updateURL(nextFilters, selectedProjects.map((project) => project.id));
@@ -576,7 +631,7 @@ export default function HomeContent() {
             <button
               onClick={handleNeedsApprovalChipToggle}
               className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                filters.approvalState === 'needs-review'
+                quickFilterOverride === 'needs-approval'
                   ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800'
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
               }`}
@@ -587,12 +642,27 @@ export default function HomeContent() {
               Needs approval
             </button>
 
+            <button
+              onClick={handleRecentlyMergedChipToggle}
+              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                quickFilterOverride === 'recently-merged-prs'
+                  ? 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+              }`}
+              title="Show recently merged pull requests while keeping your advanced filters"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h6m-6 5h10" />
+              </svg>
+              Recently merged PRs
+            </button>
+
 
             <button
               onClick={handleNotReviewedByMeChipToggle}
               disabled={!currentUser}
               className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                filters.notReviewedByMe
+                quickFilterOverride === 'not-reviewed-by-me'
                   ? 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800'
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
               } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
@@ -629,14 +699,7 @@ export default function HomeContent() {
             ) : (
               <>
                 {(() => {
-                  const hasSpecificFilters = effectiveFilters.authors?.length || 
-                                            effectiveFilters.approvalState ||
-                                            effectiveFilters.notReviewedByMe ||
-                                            effectiveFilters.title ||
-                                            effectiveFilters.dateFrom || 
-                                            effectiveFilters.dateTo;
-                  
-                  if (!hasSpecificFilters) {
+                  if (!hasSpecificFilters(effectiveFilters)) {
                     return (
                       <>
                         Showing {mergeRequests.length} of your recent merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects.
@@ -668,14 +731,7 @@ export default function HomeContent() {
           showProjectInfo={selectedProjects.length !== 1}
           loadingMessage={selectedProjects.length === 0 ? 
             ((() => {
-              const hasSpecificFilters = effectiveFilters.authors?.length || 
-                                        effectiveFilters.approvalState ||
-                                        effectiveFilters.notReviewedByMe ||
-                                        effectiveFilters.title ||
-                                        effectiveFilters.dateFrom || 
-                                        effectiveFilters.dateTo;
-              
-              return hasSpecificFilters ? 
+              return hasSpecificFilters(effectiveFilters) ? 
                 "Searching merge requests across all projects..." : 
                 "Loading 5 most recent merge requests...";
             })()) : 
