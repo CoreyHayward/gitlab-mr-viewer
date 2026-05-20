@@ -389,8 +389,8 @@ export default function HomeContent() {
     saveUIState({ filtersExpanded: newExpanded });
   };
 
-  const handleNeedsApprovalChipToggle = () => {
-    const nextOverride = quickFilterOverride === 'needs-approval' ? null : 'needs-approval';
+  const handleQuickFilterToggle = (filterOverride: QuickFilterOverride) => {
+    const nextOverride = quickFilterOverride === filterOverride ? null : filterOverride;
     const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
 
     setQuickFilterOverride(nextOverride);
@@ -401,6 +401,10 @@ export default function HomeContent() {
     } else {
       loadAllMergeRequests(nextFilters);
     }
+  };
+
+  const handleNeedsApprovalChipToggle = () => {
+    handleQuickFilterToggle('needs-approval');
   };
 
   const handleNotReviewedByMeChipToggle = () => {
@@ -408,17 +412,7 @@ export default function HomeContent() {
       return;
     }
 
-    const nextOverride = quickFilterOverride === 'not-reviewed-by-me' ? null : 'not-reviewed-by-me';
-    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
-
-    setQuickFilterOverride(nextOverride);
-    updateURL(nextFilters, selectedProjects.map((project) => project.id));
-
-    if (selectedProjects.length > 0) {
-      loadProjectMergeRequests(selectedProjects, nextFilters);
-    } else {
-      loadAllMergeRequests(nextFilters);
-    }
+    handleQuickFilterToggle('not-reviewed-by-me');
   };
 
   const handleMyOpenPrsChipToggle = () => {
@@ -426,31 +420,11 @@ export default function HomeContent() {
       return;
     }
 
-    const nextOverride = quickFilterOverride === 'my-open-prs' ? null : 'my-open-prs';
-    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
-
-    setQuickFilterOverride(nextOverride);
-    updateURL(nextFilters, selectedProjects.map((project) => project.id));
-
-    if (selectedProjects.length > 0) {
-      loadProjectMergeRequests(selectedProjects, nextFilters);
-    } else {
-      loadAllMergeRequests(nextFilters);
-    }
+    handleQuickFilterToggle('my-open-prs');
   };
 
   const handleRecentlyMergedChipToggle = () => {
-    const nextOverride = quickFilterOverride === 'recently-merged-prs' ? null : 'recently-merged-prs';
-    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
-
-    setQuickFilterOverride(nextOverride);
-    updateURL(nextFilters, selectedProjects.map((project) => project.id));
-
-    if (selectedProjects.length > 0) {
-      loadProjectMergeRequests(selectedProjects, nextFilters);
-    } else {
-      loadAllMergeRequests(nextFilters);
-    }
+    handleQuickFilterToggle('recently-merged-prs');
   };
 
   const handleRefresh = () => {
@@ -622,7 +596,7 @@ export default function HomeContent() {
               } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
               title={currentUser ? `Show only open merge requests authored by @${currentUser.username}` : 'Loading current user'}
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
               My Open PRs
@@ -636,7 +610,7 @@ export default function HomeContent() {
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
               }`}
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.66 18h16.68a1 1 0 00.87-1.5l-7.5-13a1 1 0 00-1.74 0z" />
               </svg>
               Needs approval
@@ -651,7 +625,7 @@ export default function HomeContent() {
               }`}
               title="Show recently merged merge requests while keeping your advanced filters"
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h6m-6 5h10" />
               </svg>
               Recently merged MRs
@@ -668,7 +642,7 @@ export default function HomeContent() {
               } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
               title={currentUser ? `Show merge requests not approved by @${currentUser.username}` : 'Loading current user'}
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9a3 3 0 11-6 0 3 3 0 016 0zm-9 3a3 3 0 11-6 0 3 3 0 016 0zm9 9v-1a4 4 0 00-4-4h-1m-8 5v-1a4 4 0 014-4h1m0 0a3 3 0 013 3v1m-3-4a3 3 0 00-3 3v1" />
               </svg>
               Not reviewed by me
