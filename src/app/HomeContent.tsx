@@ -9,7 +9,7 @@ import { GitLabService } from '@/services/gitlab';
 import { GitLabProject, GitLabMergeRequest, GitLabUser, FilterOptions } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
-import { Link, Link2, LogOut, RefreshCcw } from 'lucide-react';
+import { Link, LogOut, RefreshCcw } from 'lucide-react';
 
 type QuickFilterOverride = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
 
