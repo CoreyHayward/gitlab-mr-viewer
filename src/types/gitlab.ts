@@ -94,5 +94,6 @@ export interface FilterOptions {
   draft?: boolean;
   dateFrom?: string;
   dateTo?: string;
+  mergedAfter?: string;
   projects?: string[]; // Filter by project names/paths
 }

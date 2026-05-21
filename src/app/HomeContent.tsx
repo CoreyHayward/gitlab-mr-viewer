@@ -13,6 +13,12 @@ import { Link, LogOut, RefreshCcw } from 'lucide-react';
 
 type QuickFilterOverride = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
 
+const getSevenDaysAgoISOString = () => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  return sevenDaysAgo.toISOString();
+};
+
 const hasSpecificFilters = (currentFilters: FilterOptions) => (
   currentFilters.state === 'closed' ||
   currentFilters.state === 'merged' ||
@@ -26,6 +32,7 @@ const hasSpecificFilters = (currentFilters: FilterOptions) => (
     currentFilters.draft !== undefined ||
     currentFilters.dateFrom ||
     currentFilters.dateTo ||
+    currentFilters.mergedAfter ||
     currentFilters.projects?.length
   )
 );
@@ -45,7 +52,7 @@ const applyQuickFilterOverride = (
     case 'not-reviewed-by-me':
       return { ...filters, notReviewedByMe: true };
     case 'recently-merged-prs':
-      return { ...filters, state: 'merged' };
+      return { ...filters, state: 'merged', mergedAfter: getSevenDaysAgoISOString() };
     default:
       return filters;
   }
@@ -316,9 +323,10 @@ export default function HomeContent() {
       urlFilters.authors?.length || 
       urlFilters.title || 
       urlFilters.excludeTitle ||
-      urlFilters.draft !== undefined || 
+      urlFilters.draft !== undefined ||
       urlFilters.dateFrom || 
       urlFilters.dateTo ||
+      urlFilters.mergedAfter ||
       urlFilters.projects?.length;
     
     // Only auto-expand if user hasn't explicitly saved a preference
