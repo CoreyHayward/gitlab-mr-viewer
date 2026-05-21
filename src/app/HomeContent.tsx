@@ -9,9 +9,54 @@ import { GitLabService } from '@/services/gitlab';
 import { GitLabProject, GitLabMergeRequest, GitLabUser, FilterOptions } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
-import { Link, Link2, LogOut, RefreshCcw } from 'lucide-react';
+import { Link, LogOut, RefreshCcw } from 'lucide-react';
 
-type QuickFilterOverride = 'my-open-prs';
+type QuickFilterOverride = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
+
+const getSevenDaysAgoISOString = () => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  return sevenDaysAgo.toISOString();
+};
+
+const hasSpecificFilters = (currentFilters: FilterOptions) => (
+  currentFilters.state === 'closed' ||
+  currentFilters.state === 'merged' ||
+  currentFilters.state === 'all' ||
+  Boolean(
+    currentFilters.authors?.length ||
+    currentFilters.approvalState ||
+    currentFilters.notReviewedByMe ||
+    currentFilters.title ||
+    currentFilters.excludeTitle ||
+    currentFilters.draft !== undefined ||
+    currentFilters.dateFrom ||
+    currentFilters.dateTo ||
+    currentFilters.mergedAfter ||
+    currentFilters.projects?.length
+  )
+);
+
+const applyQuickFilterOverride = (
+  filters: FilterOptions,
+  quickFilterOverride: QuickFilterOverride | null,
+  currentUser: GitLabUser | null
+): FilterOptions => {
+  switch (quickFilterOverride) {
+    case 'my-open-prs':
+      return currentUser
+        ? { ...filters, state: 'opened', authors: [currentUser.username] }
+        : filters;
+    case 'needs-approval':
+      return { ...filters, approvalState: 'needs-review' };
+    case 'not-reviewed-by-me':
+      return { ...filters, notReviewedByMe: true };
+    case 'recently-merged-prs':
+      return { ...filters, state: 'merged', mergedAfter: getSevenDaysAgoISOString() };
+    default:
+      return filters;
+  }
+};
 
 export default function HomeContent() {
   const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
@@ -112,9 +157,7 @@ export default function HomeContent() {
     }
   }, [service]);
 
-  const effectiveFilters: FilterOptions = quickFilterOverride === 'my-open-prs' && currentUser
-    ? { state: 'opened', authors: [currentUser.username] }
-    : filters;
+  const effectiveFilters: FilterOptions = applyQuickFilterOverride(filters, quickFilterOverride, currentUser);
 
   useEffect(() => {
     if (!service) {
@@ -177,15 +220,8 @@ export default function HomeContent() {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load merge requests';
       
       // Check if this is just the initial load without specific filters
-      const hasSpecificFilters = currentFilters.authors?.length || 
-                                currentFilters.approvalState ||
-                                currentFilters.notReviewedByMe ||
-                                currentFilters.title ||
-                                currentFilters.dateFrom || 
-                                currentFilters.dateTo;
-
       // For initial load without filters, show a gentler message
-      if (!hasSpecificFilters && errorMessage.includes('timed out')) {
+      if (!hasSpecificFilters(currentFilters) && errorMessage.includes('timed out')) {
         setError(
           'Unable to load recent merge requests automatically.\n\n' +
           'This is normal for very large GitLab instances. To view merge requests:\n' +
@@ -287,9 +323,10 @@ export default function HomeContent() {
       urlFilters.authors?.length || 
       urlFilters.title || 
       urlFilters.excludeTitle ||
-      urlFilters.draft !== undefined || 
+      urlFilters.draft !== undefined ||
       urlFilters.dateFrom || 
       urlFilters.dateTo ||
+      urlFilters.mergedAfter ||
       urlFilters.projects?.length;
     
     // Only auto-expand if user hasn't explicitly saved a preference
@@ -360,33 +397,9 @@ export default function HomeContent() {
     saveUIState({ filtersExpanded: newExpanded });
   };
 
-  const handleNeedsApprovalChipToggle = () => {
-    const newFilters: FilterOptions = {
-      ...filters,
-      approvalState: filters.approvalState === 'needs-review' ? undefined : 'needs-review'
-    };
-
-    handleFiltersChange(newFilters);
-  };
-
-  const handleNotReviewedByMeChipToggle = () => {
-    const newFilters: FilterOptions = {
-      ...filters,
-      notReviewedByMe: filters.notReviewedByMe ? undefined : true
-    };
-
-    handleFiltersChange(newFilters);
-  };
-
-  const handleMyOpenPrsChipToggle = () => {
-    if (!currentUser) {
-      return;
-    }
-
-    const nextOverride = quickFilterOverride === 'my-open-prs' ? null : 'my-open-prs';
-    const nextFilters: FilterOptions = nextOverride === 'my-open-prs'
-      ? { state: 'opened', authors: [currentUser.username] }
-      : filters;
+  const handleQuickFilterToggle = (filterOverride: QuickFilterOverride) => {
+    const nextOverride = quickFilterOverride === filterOverride ? null : filterOverride;
+    const nextFilters = applyQuickFilterOverride(filters, nextOverride, currentUser);
 
     setQuickFilterOverride(nextOverride);
     updateURL(nextFilters, selectedProjects.map((project) => project.id));
@@ -396,6 +409,22 @@ export default function HomeContent() {
     } else {
       loadAllMergeRequests(nextFilters);
     }
+  };
+
+  const handleNeedsApprovalChipToggle = () => {
+    handleQuickFilterToggle('needs-approval');
+  };
+
+  const handleNotReviewedByMeChipToggle = () => {
+    handleQuickFilterToggle('not-reviewed-by-me');
+  };
+
+  const handleMyOpenPrsChipToggle = () => {
+    handleQuickFilterToggle('my-open-prs');
+  };
+
+  const handleRecentlyMergedChipToggle = () => {
+    handleQuickFilterToggle('recently-merged-prs');
   };
 
   const handleRefresh = () => {
@@ -567,7 +596,7 @@ export default function HomeContent() {
               } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
               title={currentUser ? `Show only open merge requests authored by @${currentUser.username}` : 'Loading current user'}
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
               My Open PRs
@@ -576,15 +605,30 @@ export default function HomeContent() {
             <button
               onClick={handleNeedsApprovalChipToggle}
               className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                filters.approvalState === 'needs-review'
+                quickFilterOverride === 'needs-approval'
                   ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800'
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
               }`}
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.66 18h16.68a1 1 0 00.87-1.5l-7.5-13a1 1 0 00-1.74 0z" />
               </svg>
               Needs approval
+            </button>
+
+            <button
+              onClick={handleRecentlyMergedChipToggle}
+              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                quickFilterOverride === 'recently-merged-prs'
+                  ? 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+              }`}
+              title="Show recently merged merge requests while keeping your non-quick advanced filters"
+            >
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h6m-6 5h10" />
+              </svg>
+              Recently merged MRs
             </button>
 
 
@@ -592,13 +636,13 @@ export default function HomeContent() {
               onClick={handleNotReviewedByMeChipToggle}
               disabled={!currentUser}
               className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                filters.notReviewedByMe
+                quickFilterOverride === 'not-reviewed-by-me'
                   ? 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800'
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
               } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
               title={currentUser ? `Show merge requests not approved by @${currentUser.username}` : 'Loading current user'}
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9a3 3 0 11-6 0 3 3 0 016 0zm-9 3a3 3 0 11-6 0 3 3 0 016 0zm9 9v-1a4 4 0 00-4-4h-1m-8 5v-1a4 4 0 014-4h1m0 0a3 3 0 013 3v1m-3-4a3 3 0 00-3 3v1" />
               </svg>
               Not reviewed by me
@@ -629,14 +673,7 @@ export default function HomeContent() {
             ) : (
               <>
                 {(() => {
-                  const hasSpecificFilters = effectiveFilters.authors?.length || 
-                                            effectiveFilters.approvalState ||
-                                            effectiveFilters.notReviewedByMe ||
-                                            effectiveFilters.title ||
-                                            effectiveFilters.dateFrom || 
-                                            effectiveFilters.dateTo;
-                  
-                  if (!hasSpecificFilters) {
+                  if (!hasSpecificFilters(effectiveFilters)) {
                     return (
                       <>
                         Showing {mergeRequests.length} of your recent merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects.
@@ -668,14 +705,7 @@ export default function HomeContent() {
           showProjectInfo={selectedProjects.length !== 1}
           loadingMessage={selectedProjects.length === 0 ? 
             ((() => {
-              const hasSpecificFilters = effectiveFilters.authors?.length || 
-                                        effectiveFilters.approvalState ||
-                                        effectiveFilters.notReviewedByMe ||
-                                        effectiveFilters.title ||
-                                        effectiveFilters.dateFrom || 
-                                        effectiveFilters.dateTo;
-              
-              return hasSpecificFilters ? 
+              return hasSpecificFilters(effectiveFilters) ? 
                 "Searching merge requests across all projects..." : 
                 "Loading 5 most recent merge requests...";
             })()) : 

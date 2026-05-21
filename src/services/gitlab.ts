@@ -9,6 +9,14 @@ import {
 } from '@/types/gitlab';
 import { matchesApprovalFilter } from '@/utils/approvalState';
 
+const getMergeRequestSortTimestamp = (mergeRequest: GitLabMergeRequest, filters: FilterOptions) => {
+  if (filters.mergedAfter && mergeRequest.merged_at) {
+    return new Date(mergeRequest.merged_at).getTime();
+  }
+
+  return new Date(mergeRequest.updated_at).getTime();
+};
+
 export class GitLabService {
   private baseUrl: string;
   private token: string;
@@ -440,6 +448,12 @@ export class GitLabService {
         return false;
       }
 
+      if (filters.mergedAfter) {
+        if (!mr.merged_at || new Date(mr.merged_at).getTime() < new Date(filters.mergedAfter).getTime()) {
+          return false;
+        }
+      }
+
       if (filters.approvalState && !matchesApprovalFilter(mr.approval_status, filters.approvalState, mr.state)) {
         return false;
       }
@@ -587,8 +601,12 @@ export class GitLabService {
         params.append('created_before', filters.dateTo);
       }
 
+      if (filters.mergedAfter) {
+        params.append('updated_after', filters.mergedAfter);
+      }
+
       params.append('per_page', '100');
-      params.append('order_by', 'updated_at');
+      params.append('order_by', filters.mergedAfter ? 'merged_at' : 'updated_at');
       params.append('sort', 'desc');
       
       return params;
@@ -629,7 +647,7 @@ export class GitLabService {
       allMergeRequests = Array.from(mrMap.values());
       
       // Sort once after deduplication
-      allMergeRequests.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+      allMergeRequests.sort((a, b) => getMergeRequestSortTimestamp(b, filters) - getMergeRequestSortTimestamp(a, filters));
     } else {
       // Single API call - already sorted by GitLab
       const params = buildParams();
@@ -675,25 +693,34 @@ export class GitLabService {
     for (const projectMergeRequests of results) {
       for (const mergeRequest of projectMergeRequests) {
         const existing = mergeRequestMap.get(mergeRequest.id);
-        if (!existing || new Date(mergeRequest.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
+        if (!existing || getMergeRequestSortTimestamp(mergeRequest, filters) > getMergeRequestSortTimestamp(existing, filters)) {
           mergeRequestMap.set(mergeRequest.id, mergeRequest);
         }
       }
     }
 
     return Array.from(mergeRequestMap.values()).sort(
-      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      (a, b) => getMergeRequestSortTimestamp(b, filters) - getMergeRequestSortTimestamp(a, filters)
     );
   }
 
   async getAllMergeRequests(filters: FilterOptions = {}, signal?: AbortSignal): Promise<GitLabMergeRequest[]> {
     // Determine if we have specific filters early
-    const hasSpecificFilters = filters.authors?.length || 
-                              filters.approvalState ||
-                              filters.notReviewedByMe ||
-                              filters.title ||
-                              filters.dateFrom || 
-                              filters.dateTo;
+    const hasSpecificFilters = filters.state === 'closed' ||
+      filters.state === 'merged' ||
+      filters.state === 'all' ||
+      Boolean(
+        filters.authors?.length ||
+        filters.approvalState ||
+        filters.notReviewedByMe ||
+        filters.title ||
+        filters.excludeTitle ||
+        filters.draft !== undefined ||
+        filters.dateFrom ||
+        filters.dateTo ||
+        filters.mergedAfter ||
+        filters.projects?.length
+      );
     
     const buildParams = (authorUsername?: string): URLSearchParams => {
       const params = new URLSearchParams();
@@ -714,16 +741,20 @@ export class GitLabService {
         params.append('created_before', filters.dateTo);
       }
 
+      if (filters.mergedAfter) {
+        params.append('updated_after', filters.mergedAfter);
+      }
+
       // Don't use scope=all for initial load without filters as it's too intensive
       if (hasSpecificFilters) {
         params.append('scope', 'all');
       }
       
-      params.append('order_by', 'updated_at');
+      params.append('order_by', filters.mergedAfter ? 'merged_at' : 'updated_at');
       params.append('sort', 'desc');
 
       // More generous page size for author-specific queries
-      const pageSize = hasSpecificFilters ? '50' : '5';
+      const pageSize = filters.mergedAfter ? '100' : hasSpecificFilters ? '50' : '5';
       params.append('per_page', pageSize);
       
       return params;
@@ -767,7 +798,7 @@ export class GitLabService {
         allMergeRequests = Array.from(mrMap.values());
         
         // Sort once after deduplication - GitLab sorts per-author, but we need to re-sort combined results
-        allMergeRequests.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        allMergeRequests.sort((a, b) => getMergeRequestSortTimestamp(b, filters) - getMergeRequestSortTimestamp(a, filters));
       } else {
         // Single API call - already sorted by GitLab, no need to re-sort
         const params = buildParams();

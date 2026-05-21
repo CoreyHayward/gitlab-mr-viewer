@@ -49,6 +49,10 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectIds?: number[]
     params.set('dateTo', filters.dateTo);
   }
 
+  if (filters.mergedAfter) {
+    params.set('mergedAfter', filters.mergedAfter);
+  }
+
   if (filters.projects && filters.projects.length > 0) {
     params.set('projects', filters.projects.join(','));
   }
@@ -122,6 +126,10 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
   
   if (searchParams.has('dateTo')) {
     filters.dateTo = searchParams.get('dateTo')!;
+  }
+
+  if (searchParams.has('mergedAfter')) {
+    filters.mergedAfter = searchParams.get('mergedAfter')!;
   }
 
   if (searchParams.has('projects')) {
