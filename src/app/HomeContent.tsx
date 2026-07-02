@@ -72,6 +72,7 @@ export default function HomeContent() {
   const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
   const [quickFilterOverride, setQuickFilterOverride] = useState<QuickFilterOverride | null>(null);
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
+  const [mergeTrainWatcherTrainMode, setMergeTrainWatcherTrainMode] = useState(false);
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const approvalAbortControllerRef = useRef<AbortController | null>(null);
@@ -445,6 +446,9 @@ export default function HomeContent() {
 
   const handleMergeTrainWatcherVisibilityChange = (visible: boolean) => {
     setMergeTrainWatcherVisible(visible);
+    if (!visible) {
+      setMergeTrainWatcherTrainMode(false);
+    }
     saveUIState({ mergeTrainWatcherVisible: visible });
   };
 
@@ -574,9 +578,22 @@ export default function HomeContent() {
         </div>
 
         <div className={mergeTrainWatcherVisible
-          ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start [@media(min-width:2304px)]:relative [@media(min-width:2304px)]:block'
+          ? mergeTrainWatcherTrainMode
+            ? 'space-y-6'
+            : 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start [@media(min-width:2304px)]:relative [@media(min-width:2304px)]:block'
           : ''
         }>
+          {mergeTrainWatcherVisible && mergeTrainWatcherTrainMode && (
+            <aside>
+              <MergeTrainWatcher
+                service={service}
+                onHide={() => handleMergeTrainWatcherVisibilityChange(false)}
+                trainModeEnabled={mergeTrainWatcherTrainMode}
+                onTrainModeChange={setMergeTrainWatcherTrainMode}
+              />
+            </aside>
+          )}
+
           <main className="min-w-0">
             {/* Project Selector */}
             <div className="mb-6">
@@ -759,11 +776,13 @@ export default function HomeContent() {
             )}
           </main>
 
-          {mergeTrainWatcherVisible && (
+          {mergeTrainWatcherVisible && !mergeTrainWatcherTrainMode && (
             <aside className="order-first xl:order-none xl:sticky xl:top-6 [@media(min-width:2304px)]:absolute [@media(min-width:2304px)]:left-full [@media(min-width:2304px)]:top-0 [@media(min-width:2304px)]:ml-6 [@media(min-width:2304px)]:w-[360px]">
               <MergeTrainWatcher
                 service={service}
                 onHide={() => handleMergeTrainWatcherVisibilityChange(false)}
+                trainModeEnabled={mergeTrainWatcherTrainMode}
+                onTrainModeChange={setMergeTrainWatcherTrainMode}
               />
             </aside>
           )}

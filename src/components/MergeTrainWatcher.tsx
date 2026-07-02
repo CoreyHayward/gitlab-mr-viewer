@@ -21,10 +21,14 @@ import {
 
 const WATCHED_PROJECTS_KEY = 'gitlab-merge-train-watch-projects';
 const REFRESH_INTERVAL_MS = 60_000;
+const TRAIN_MODE_CLICK_COUNT = 5;
+const TRAIN_MODE_CLICK_WINDOW_MS = 1400;
 
 interface MergeTrainWatcherProps {
   service: GitLabService;
   onHide?: () => void;
+  trainModeEnabled?: boolean;
+  onTrainModeChange?: (enabled: boolean) => void;
 }
 
 const isProject = (value: unknown): value is GitLabProject => {
@@ -66,7 +70,12 @@ const saveWatchedProjects = (projects: GitLabProject[]) => {
   }
 };
 
-export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcherProps) {
+export default function MergeTrainWatcher({
+  service,
+  onHide,
+  trainModeEnabled = false,
+  onTrainModeChange
+}: MergeTrainWatcherProps) {
   const [watchedProjects, setWatchedProjects] = useState<GitLabProject[]>([]);
   const [projectOptions, setProjectOptions] = useState<GitLabProject[]>([]);
   const [statuses, setStatuses] = useState<GitLabMergeTrainProjectStatus[]>([]);
@@ -81,6 +90,8 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
   const pickerRef = useRef<HTMLDivElement>(null);
   const projectAbortControllerRef = useRef<AbortController | null>(null);
   const statusAbortControllerRef = useRef<AbortController | null>(null);
+  const titleClickCountRef = useRef(0);
+  const titleClickTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const savedUIState = loadUIState();
@@ -192,6 +203,9 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
       if (statusAbortControllerRef.current) {
         statusAbortControllerRef.current.abort();
       }
+      if (titleClickTimeoutRef.current) {
+        window.clearTimeout(titleClickTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -241,6 +255,27 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
 
   const getProjectStatus = (project: GitLabProject) => {
     return statuses.find((status) => status.project.id === project.id) ?? { project, trains: [] };
+  };
+
+  const handleTitleClick = (event: React.MouseEvent<HTMLHeadingElement>) => {
+    event.stopPropagation();
+
+    if (titleClickTimeoutRef.current) {
+      window.clearTimeout(titleClickTimeoutRef.current);
+    }
+
+    titleClickCountRef.current += 1;
+
+    if (titleClickCountRef.current >= TRAIN_MODE_CLICK_COUNT) {
+      titleClickCountRef.current = 0;
+      onTrainModeChange?.(!trainModeEnabled);
+      return;
+    }
+
+    titleClickTimeoutRef.current = window.setTimeout(() => {
+      titleClickCountRef.current = 0;
+      titleClickTimeoutRef.current = null;
+    }, TRAIN_MODE_CLICK_WINDOW_MS);
   };
 
   const formatRelativeTime = (date: Date) => {
@@ -315,8 +350,111 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
     </div>
   );
 
+  const renderTrainModeScene = () => {
+    const trainCars = statuses.flatMap((projectStatus) => (
+      projectStatus.trains.map((train, trainIndex) => ({
+        project: projectStatus.project,
+        train,
+        trainIndex
+      }))
+    ));
+
+    const clearProjects = watchedProjects.filter((project) => getProjectStatus(project).trains.length === 0);
+
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+              Merge train yard
+            </div>
+            <div className="text-xs text-amber-800 dark:text-amber-200">
+              {trainCars.length > 0
+                ? `${trainCars.length} MR car${trainCars.length === 1 ? '' : 's'} making the loop`
+                : 'No active MR cars on the track'}
+            </div>
+          </div>
+          {clearProjects.length > 0 && (
+            <div className="flex max-w-full flex-wrap gap-1.5">
+              {clearProjects.slice(0, 4).map((project) => (
+                <span
+                  key={project.id}
+                  className="max-w-56 truncate rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                >
+                  {project.path_with_namespace} clear
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="merge-train-track-scene">
+          <div className="merge-train-track" />
+          <div className="merge-train-ties" />
+          <div className={`merge-train-convoy ${trainCars.length === 0 ? 'merge-train-convoy-idle' : ''}`}>
+            <div className="merge-train-engine">
+              <div className="merge-train-engine-cab" />
+              <div className="merge-train-engine-window" />
+              <div className="merge-train-engine-stripe" />
+              <div className="merge-train-wheel merge-train-wheel-left" />
+              <div className="merge-train-wheel merge-train-wheel-right" />
+            </div>
+
+            {trainCars.length === 0 ? (
+              <div className="merge-train-empty-car">
+                Clear track
+              </div>
+            ) : (
+              trainCars.map(({ project, train, trainIndex }, index) => (
+                <a
+                  key={train.id}
+                  href={train.merge_request.web_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="merge-train-car"
+                  title={`Position ${index + 1}: ${train.merge_request.title}`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase">
+                      Car {index + 1}
+                    </span>
+                    <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-medium capitalize text-amber-900 dark:bg-black/20 dark:text-amber-100">
+                      {train.status}
+                    </span>
+                  </span>
+                  <span className="line-clamp-2 text-xs font-semibold">
+                    #{train.merge_request.iid} {train.merge_request.title}
+                  </span>
+                  <span className="truncate text-[10px] font-medium">
+                    {project.path_with_namespace}
+                  </span>
+                  <span className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="truncate">
+                      Position {trainIndex + 1}
+                    </span>
+                    {train.pipeline && (
+                      <span className={`shrink-0 font-semibold ${getPipelineTone(train.pipeline.status)}`}>
+                        {train.pipeline.status}
+                      </span>
+                    )}
+                  </span>
+                  <span className="merge-train-car-wheel merge-train-car-wheel-left" />
+                  <span className="merge-train-car-wheel merge-train-car-wheel-right" />
+                </a>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <section className="overflow-visible rounded-xl border border-gray-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-800">
+    <section className={`overflow-visible rounded-xl border bg-white shadow-sm dark:bg-neutral-800 ${
+      trainModeEnabled
+        ? 'border-amber-200 dark:border-amber-900'
+        : 'border-gray-200 dark:border-neutral-700'
+    }`}>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <button
@@ -335,7 +473,11 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                <h2
+                  onClick={handleTitleClick}
+                  title="Merge Train Watcher"
+                  className={`text-base font-semibold text-gray-900 dark:text-white ${trainModeEnabled ? 'text-amber-800 dark:text-amber-200' : ''}`}
+                >
                   Merge Train Watcher
                 </h2>
                 {watchedProjects.length > 0 && (
@@ -385,7 +527,7 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
           </div>
         </div>
 
-        <div className={`${isExpanded ? 'block' : 'hidden'} mt-4 space-y-4 xl:block`}>
+        <div className={`${isExpanded || trainModeEnabled ? 'block' : 'hidden'} mt-4 space-y-4 xl:block`}>
           <div className="relative" ref={pickerRef}>
             <button
               type="button"
@@ -506,6 +648,29 @@ export default function MergeTrainWatcher({ service, onHide }: MergeTrainWatcher
             <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-neutral-700 dark:text-gray-400">
               The watcher is separate from the MR repo selector, so you can monitor release-critical repos without changing the list below.
             </div>
+          ) : trainModeEnabled ? (
+            <>
+              {statuses.some((projectStatus) => projectStatus.error) && (
+                <div className="space-y-3">
+                  {statuses.filter((projectStatus) => projectStatus.error).map((projectStatus) => (
+                    <div key={projectStatus.project.id} className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/30">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-300" />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-rose-900 dark:text-rose-100">
+                            {projectStatus.project.path_with_namespace}
+                          </div>
+                          <div className="mt-1 text-xs text-rose-700 dark:text-rose-200">
+                            {projectStatus.error}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {renderTrainModeScene()}
+            </>
           ) : (
             <div className="space-y-3">
               {watchedProjects.map((project) => {
