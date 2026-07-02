@@ -5,11 +5,12 @@ import ConfigForm from '@/components/ConfigForm';
 import ProjectSelector from '@/components/ProjectSelector';
 import FilterPanel from '@/components/FilterPanel';
 import MergeRequestList from '@/components/MergeRequestList';
+import MergeTrainWatcher from '@/components/MergeTrainWatcher';
 import { GitLabService } from '@/services/gitlab';
 import { GitLabProject, GitLabMergeRequest, GitLabUser, FilterOptions } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 import { loadUIState, saveUIState } from '@/utils/uiState';
-import { Link, LogOut, RefreshCcw } from 'lucide-react';
+import { GitBranch, Link, LogOut, RefreshCcw } from 'lucide-react';
 
 type QuickFilterOverride = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
 
@@ -70,6 +71,7 @@ export default function HomeContent() {
   const [urlProjectIds, setUrlProjectIds] = useState<number[]>([]);
   const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
   const [quickFilterOverride, setQuickFilterOverride] = useState<QuickFilterOverride | null>(null);
+  const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const approvalAbortControllerRef = useRef<AbortController | null>(null);
@@ -81,6 +83,9 @@ export default function HomeContent() {
       const savedUIState = loadUIState();
       if (savedUIState.filtersExpanded !== undefined) {
         setFiltersExpanded(savedUIState.filtersExpanded);
+      }
+      if (savedUIState.mergeTrainWatcherVisible !== undefined) {
+        setMergeTrainWatcherVisible(savedUIState.mergeTrainWatcherVisible);
       }
     }
   }, []);
@@ -438,6 +443,11 @@ export default function HomeContent() {
     }
   };
 
+  const handleMergeTrainWatcherVisibilityChange = (visible: boolean) => {
+    setMergeTrainWatcherVisible(visible);
+    saveUIState({ mergeTrainWatcherVisible: visible });
+  };
+
   const handleShareURL = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -544,6 +554,15 @@ export default function HomeContent() {
                 Share URL
               </button>
             )}
+            {!mergeTrainWatcherVisible && (
+              <button
+                onClick={() => handleMergeTrainWatcherVisibilityChange(true)}
+                className={secondaryActionClassName}
+              >
+                <GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                Merge Trains
+              </button>
+            )}
             <button
               onClick={handleDisconnect}
               className={secondaryActionClassName}
@@ -554,185 +573,201 @@ export default function HomeContent() {
           </div>
         </div>
 
-        {/* Project Selector */}
-        <div className="mb-6">
-          <ProjectSelector
-            service={service}
-            selectedProjects={selectedProjects}
-            onProjectsChange={handleProjectsChange}
-          />
-        </div>
+        <div className={mergeTrainWatcherVisible
+          ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start [@media(min-width:2304px)]:relative [@media(min-width:2304px)]:block'
+          : ''
+        }>
+          <main className="min-w-0">
+            {/* Project Selector */}
+            <div className="mb-6">
+              <ProjectSelector
+                service={service}
+                selectedProjects={selectedProjects}
+                onProjectsChange={handleProjectsChange}
+              />
+            </div>
 
-        {/* Filters */}
-        {service && (
-          <div className="mb-6">
-            <FilterPanel
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              isExpanded={filtersExpanded}
-              onToggle={handleFiltersToggle}
-              service={service}
-            />
-          </div>
-        )}
-
-        {/* Error Display */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 rounded-md">
-            <div className="whitespace-pre-line">{error}</div>
-          </div>
-        )}
-
-        {/* Quick Filter Chips */}
-        {!error && (
-          <div className="mb-4 flex flex-wrap gap-2">
-            <button
-              onClick={handleMyOpenPrsChipToggle}
-              disabled={!currentUser}
-              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                quickFilterOverride === 'my-open-prs'
-                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
-              } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
-              title={currentUser ? `Show only open merge requests authored by @${currentUser.username}` : 'Loading current user'}
-            >
-              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              My Open PRs
-            </button>
-
-            <button
-              onClick={handleNeedsApprovalChipToggle}
-              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                quickFilterOverride === 'needs-approval'
-                  ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
-              }`}
-            >
-              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.66 18h16.68a1 1 0 00.87-1.5l-7.5-13a1 1 0 00-1.74 0z" />
-              </svg>
-              Needs approval
-            </button>
-
-            <button
-              onClick={handleRecentlyMergedChipToggle}
-              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                quickFilterOverride === 'recently-merged-prs'
-                  ? 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
-              }`}
-              title="Show recently merged merge requests while keeping your non-quick advanced filters"
-            >
-              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h6m-6 5h10" />
-              </svg>
-              Recently merged MRs
-            </button>
-
-
-            <button
-              onClick={handleNotReviewedByMeChipToggle}
-              disabled={!currentUser}
-              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                quickFilterOverride === 'not-reviewed-by-me'
-                  ? 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
-              } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
-              title={currentUser ? `Show merge requests not approved by @${currentUser.username}` : 'Loading current user'}
-            >
-              <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9a3 3 0 11-6 0 3 3 0 016 0zm-9 3a3 3 0 11-6 0 3 3 0 016 0zm9 9v-1a4 4 0 00-4-4h-1m-8 5v-1a4 4 0 014-4h1m0 0a3 3 0 013 3v1m-3-4a3 3 0 00-3 3v1" />
-              </svg>
-              Not reviewed by me
-            </button>
-          </div>
-        )}
-
-
-        {/* Results Summary */}
-        {!loading && !error && (
-          <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-            {selectedProjects.length === 1 ? (
-              <>
-                Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
-                {' '}in <strong>{selectedProjects[0].path_with_namespace}</strong>
-                {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
-                  <span> by {effectiveFilters.authors.join(', ')}</span>
-                )}
-              </>
-            ) : selectedProjects.length > 1 ? (
-              <>
-                Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
-                {' '}across <strong>{selectedProjects.length} selected projects</strong>
-                {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
-                  <span> by {effectiveFilters.authors.join(', ')}</span>
-                )}
-              </>
-            ) : (
-              <>
-                {(() => {
-                  if (!hasSpecificFilters(effectiveFilters)) {
-                    return (
-                      <>
-                        Showing {mergeRequests.length} of your recent merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects.
-                        <br />
-                        <span className="text-violet-600 dark:text-violet-400 font-medium">
-                          💡 Use the filters above to search for more merge requests.
-                        </span>
-                      </>
-                    );
-                  } else {
-                    return (
-                      <>
-                        Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects
-                        {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
-                          <span> by {effectiveFilters.authors.join(', ')}</span>
-                        )}
-                      </>
-                    );
-                  }
-                })()}
-              </>
+            {/* Filters */}
+            {service && (
+              <div className="mb-6">
+                <FilterPanel
+                  filters={filters}
+                  onFiltersChange={handleFiltersChange}
+                  isExpanded={filtersExpanded}
+                  onToggle={handleFiltersToggle}
+                  service={service}
+                />
+              </div>
             )}
-          </div>
-        )}
-        {/* Merge Requests List */}
-        <MergeRequestList 
-          mergeRequests={mergeRequests} 
-          loading={loading} 
-          showProjectInfo={selectedProjects.length !== 1}
-          loadingMessage={selectedProjects.length === 0 ? 
-            ((() => {
-              return hasSpecificFilters(effectiveFilters) ? 
-                "Searching merge requests across all projects..." : 
-                "Loading 5 most recent merge requests...";
-            })()) : 
-            selectedProjects.length > 1
-              ? `Loading merge requests from ${selectedProjects.length} selected projects...`
-              : undefined
-          }
-        />
 
-        {/* Instructions when no MRs and not loading */}
-        {!loading && mergeRequests.length === 0 && !error && (
-          <div className="text-center py-12">
-            <div className="text-gray-500 dark:text-gray-400 text-lg mb-2">
-              {selectedProjects.length === 1
-                ? 'No merge requests found in this project'
-                : selectedProjects.length > 1
-                  ? 'No merge requests found in the selected projects'
-                  : 'No merge requests found'}
-            </div>
-            <div className="text-gray-400 dark:text-gray-500 text-sm">
-              {selectedProjects.length > 0
-                ? 'Try adjusting your filters or select different projects'
-                : 'Try adjusting your filters or select a specific project'
+            {/* Error Display */}
+            {error && (
+              <div className="mb-6 p-4 bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 rounded-md">
+                <div className="whitespace-pre-line">{error}</div>
+              </div>
+            )}
+
+            {/* Quick Filter Chips */}
+            {!error && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                <button
+                  onClick={handleMyOpenPrsChipToggle}
+                  disabled={!currentUser}
+                  className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    quickFilterOverride === 'my-open-prs'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+                  } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
+                  title={currentUser ? `Show only open merge requests authored by @${currentUser.username}` : 'Loading current user'}
+                >
+                  <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  My Open PRs
+                </button>
+
+                <button
+                  onClick={handleNeedsApprovalChipToggle}
+                  className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    quickFilterOverride === 'needs-approval'
+                      ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+                  }`}
+                >
+                  <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.66 18h16.68a1 1 0 00.87-1.5l-7.5-13a1 1 0 00-1.74 0z" />
+                  </svg>
+                  Needs approval
+                </button>
+
+                <button
+                  onClick={handleRecentlyMergedChipToggle}
+                  className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    quickFilterOverride === 'recently-merged-prs'
+                      ? 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+                  }`}
+                  title="Show recently merged merge requests while keeping your non-quick advanced filters"
+                >
+                  <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h6m-6 5h10" />
+                  </svg>
+                  Recently merged MRs
+                </button>
+
+                <button
+                  onClick={handleNotReviewedByMeChipToggle}
+                  disabled={!currentUser}
+                  className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    quickFilterOverride === 'not-reviewed-by-me'
+                      ? 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-neutral-800 dark:text-gray-200 dark:border-neutral-600 dark:hover:bg-neutral-700'
+                  } ${!currentUser ? 'cursor-not-allowed opacity-60 hover:bg-white dark:hover:bg-neutral-800' : ''}`}
+                  title={currentUser ? `Show merge requests not approved by @${currentUser.username}` : 'Loading current user'}
+                >
+                  <svg aria-hidden="true" className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9a3 3 0 11-6 0 3 3 0 016 0zm-9 3a3 3 0 11-6 0 3 3 0 016 0zm9 9v-1a4 4 0 00-4-4h-1m-8 5v-1a4 4 0 014-4h1m0 0a3 3 0 013 3v1m-3-4a3 3 0 00-3 3v1" />
+                  </svg>
+                  Not reviewed by me
+                </button>
+              </div>
+            )}
+
+
+            {/* Results Summary */}
+            {!loading && !error && (
+              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                {selectedProjects.length === 1 ? (
+                  <>
+                    Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
+                    {' '}in <strong>{selectedProjects[0].path_with_namespace}</strong>
+                    {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
+                      <span> by {effectiveFilters.authors.join(', ')}</span>
+                    )}
+                  </>
+                ) : selectedProjects.length > 1 ? (
+                  <>
+                    Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''}
+                    {' '}across <strong>{selectedProjects.length} selected projects</strong>
+                    {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
+                      <span> by {effectiveFilters.authors.join(', ')}</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {(() => {
+                      if (!hasSpecificFilters(effectiveFilters)) {
+                        return (
+                          <>
+                            Showing {mergeRequests.length} of your recent merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects.
+                            <br />
+                            <span className="text-violet-600 dark:text-violet-400 font-medium">
+                              Use the filters above to search for more merge requests.
+                            </span>
+                          </>
+                        );
+                      } else {
+                        return (
+                          <>
+                            Found {mergeRequests.length} merge request{mergeRequests.length !== 1 ? 's' : ''} across all projects
+                            {effectiveFilters.authors && effectiveFilters.authors.length > 0 && (
+                              <span> by {effectiveFilters.authors.join(', ')}</span>
+                            )}
+                          </>
+                        );
+                      }
+                    })()}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Merge Requests List */}
+            <MergeRequestList 
+              mergeRequests={mergeRequests} 
+              loading={loading} 
+              showProjectInfo={selectedProjects.length !== 1}
+              loadingMessage={selectedProjects.length === 0 ? 
+                ((() => {
+                  return hasSpecificFilters(effectiveFilters) ? 
+                    "Searching merge requests across all projects..." : 
+                    "Loading 5 most recent merge requests...";
+                })()) : 
+                selectedProjects.length > 1
+                  ? `Loading merge requests from ${selectedProjects.length} selected projects...`
+                  : undefined
               }
-            </div>
-          </div>
-        )}
+            />
+
+            {/* Instructions when no MRs and not loading */}
+            {!loading && mergeRequests.length === 0 && !error && (
+              <div className="text-center py-12">
+                <div className="text-gray-500 dark:text-gray-400 text-lg mb-2">
+                  {selectedProjects.length === 1
+                    ? 'No merge requests found in this project'
+                    : selectedProjects.length > 1
+                      ? 'No merge requests found in the selected projects'
+                      : 'No merge requests found'}
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 text-sm">
+                  {selectedProjects.length > 0
+                    ? 'Try adjusting your filters or select different projects'
+                    : 'Try adjusting your filters or select a specific project'
+                  }
+                </div>
+              </div>
+            )}
+          </main>
+
+          {mergeTrainWatcherVisible && (
+            <aside className="order-first xl:order-none xl:sticky xl:top-6 [@media(min-width:2304px)]:absolute [@media(min-width:2304px)]:left-full [@media(min-width:2304px)]:top-0 [@media(min-width:2304px)]:ml-6 [@media(min-width:2304px)]:w-[360px]">
+              <MergeTrainWatcher
+                service={service}
+                onHide={() => handleMergeTrainWatcherVisibilityChange(false)}
+              />
+            </aside>
+          )}
+        </div>
       </div>
     </div>
   );

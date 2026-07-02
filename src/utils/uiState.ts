@@ -3,6 +3,8 @@
 interface UIState {
   filtersExpanded?: boolean;
   projectSelectorOpen?: boolean;
+  mergeTrainWatcherExpanded?: boolean;
+  mergeTrainWatcherVisible?: boolean;
 }
 
 const UI_STATE_KEY = 'gitlab-mr-viewer-ui-state';

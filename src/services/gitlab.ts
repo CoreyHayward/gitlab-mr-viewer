@@ -3,6 +3,8 @@ import {
   GitLabMergeRequest,
   GitLabMergeRequestApprovalStatus,
   GitLabMergeRequestDiffStats,
+  GitLabMergeTrain,
+  GitLabMergeTrainProjectStatus,
   GitLabUser,
   GitLabGroup,
   FilterOptions
@@ -29,6 +31,7 @@ export class GitLabService {
   private readonly DIFF_STATS_CACHE_DURATION = 5 * 60 * 1000;
   private readonly DIFF_STATS_PROJECT_BATCH_SIZE = 4;
   private diffStatsCache = new Map<string, { stats: GitLabMergeRequestDiffStats; timestamp: number }>();
+  private readonly ACTIVE_MERGE_TRAIN_STATUSES = new Set(['idle', 'fresh', 'stale']);
 
   constructor(instanceUrl: string, token: string) {
     this.baseUrl = instanceUrl.endsWith('/') ? instanceUrl.slice(0, -1) : instanceUrl;
@@ -418,6 +421,57 @@ export class GitLabService {
 
   async getProject(projectId: number, signal?: AbortSignal): Promise<GitLabProject> {
     return this.makeRequest<GitLabProject>(`/projects/${projectId}`, 30000, signal);
+  }
+
+  async getActiveMergeTrains(projectId: number, signal?: AbortSignal): Promise<GitLabMergeTrain[]> {
+    const trains = await this.makeRequest<GitLabMergeTrain[]>(
+      `/projects/${projectId}/merge_trains?scope=active&sort=asc&per_page=100`,
+      10000,
+      signal
+    );
+
+    return trains.filter((train) => (
+      this.ACTIVE_MERGE_TRAIN_STATUSES.has(train.status) &&
+      train.merge_request.state === 'opened' &&
+      train.merged_at === null &&
+      train.duration === null
+    ));
+  }
+
+  async getActiveMergeTrainsForProjects(
+    projects: GitLabProject[],
+    signal?: AbortSignal
+  ): Promise<GitLabMergeTrainProjectStatus[]> {
+    const uniqueProjects = Array.from(
+      new Map(projects.map((project) => [project.id, project])).values()
+    );
+
+    const results = await Promise.all(
+      uniqueProjects.map(async (project) => {
+        try {
+          const trains = await this.getActiveMergeTrains(project.id, signal);
+          return { project, trains };
+        } catch (error) {
+          if (error instanceof Error && error.message === 'Request cancelled') {
+            throw error;
+          }
+
+          return {
+            project,
+            trains: [],
+            error: error instanceof Error ? error.message : 'Failed to load merge train'
+          };
+        }
+      })
+    );
+
+    return results.sort((a, b) => {
+      if (b.trains.length !== a.trains.length) {
+        return b.trains.length - a.trains.length;
+      }
+
+      return a.project.path_with_namespace.localeCompare(b.project.path_with_namespace);
+    });
   }
 
   async getCurrentUser(signal?: AbortSignal): Promise<GitLabUser> {

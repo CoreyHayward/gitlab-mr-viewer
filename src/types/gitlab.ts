@@ -84,6 +84,42 @@ export interface GitLabMergeRequestDiffStats {
   file_count: number;
 }
 
+export interface GitLabMergeTrain {
+  id: number;
+  status: string;
+  target_branch: string;
+  created_at: string;
+  updated_at: string;
+  merged_at: string | null;
+  duration: number | null;
+  merge_request: Pick<
+    GitLabMergeRequest,
+    'id' | 'iid' | 'project_id' | 'title' | 'description' | 'state' | 'created_at' | 'updated_at' | 'web_url'
+  >;
+  pipeline: {
+    id: number;
+    iid?: number;
+    project_id: number;
+    ref: string;
+    sha: string;
+    source?: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    web_url: string;
+  } | null;
+  user: GitLabUser & {
+    state?: string;
+    web_url?: string;
+  };
+}
+
+export interface GitLabMergeTrainProjectStatus {
+  project: GitLabProject;
+  trains: GitLabMergeTrain[];
+  error?: string;
+}
+
 export interface FilterOptions {
   state?: 'opened' | 'closed' | 'merged' | 'all';
   approvalState?: ApprovalFilterState;
