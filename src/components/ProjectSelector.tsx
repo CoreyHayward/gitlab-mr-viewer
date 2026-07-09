@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { GitLabProject } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
 import { loadUIState, saveUIState } from '@/utils/uiState';
-import { ChevronDown, X, Check } from 'lucide-react';
+import { ChevronDown, X, Check, Search } from 'lucide-react';
 
 interface ProjectSelectorProps {
   service: GitLabService;
@@ -169,125 +169,89 @@ export default function ProjectSelector({ service, selectedProjects, onProjectsC
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <div className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-lg p-4">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Select Projects
-        </label>
-        
-        <button
-          onClick={handleToggleOpen}
-          className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 dark:border-neutral-600 rounded-md shadow-sm bg-white dark:bg-neutral-700 text-left focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
-        >
-          <div className="min-w-0">
-            <div className="truncate text-gray-900 dark:text-white">
-              {getSelectionLabel()}
-            </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              {selectedProjects.length === 0
-                ? 'Show merge requests from all accessible projects'
-                : `${selectedProjects.length} selected`}
-            </div>
-          </div>
-          <ChevronDown
-            className={`w-5 h-5 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-          />
-        </button>
+      <button
+        type="button"
+        onClick={handleToggleOpen}
+        className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08]"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span className="max-w-48 truncate font-medium">{getSelectionLabel()}</span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
 
-        {selectedProjects.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {selectedProjects.map((project) => (
-              <span
-                key={project.id}
-                className="inline-flex items-center px-3 py-1 bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-200 text-sm rounded-full border border-violet-200 dark:border-violet-800"
-              >
-                <span className="max-w-64 truncate">{project.path_with_namespace}</span>
-                <button
-                  onClick={() => handleProjectToggle(project)}
-                  className="ml-2 text-violet-600 dark:text-violet-300 hover:text-violet-800 dark:hover:text-violet-100"
-                  aria-label={`Remove ${project.path_with_namespace}`}
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {isOpen && (
-          <div className="absolute z-10 w-full mt-1 bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-md shadow-lg">
-            <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+      {isOpen && (
+        <div className="absolute left-0 z-30 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-white/10 dark:bg-slate-900">
+          <div className="border-b border-slate-100 p-3 dark:border-white/10">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search projects..."
+                placeholder="Search projects…"
                 value={searchTerm}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-neutral-600 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 dark:bg-neutral-700 dark:text-white text-sm"
+                onChange={(event) => handleSearch(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
               />
             </div>
-            
-            <div className="max-h-60 overflow-y-auto">
-              {loading ? (
-                <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                  Loading projects...
-                </div>
-              ) : error ? (
-                <div className="p-4 text-center text-red-600 dark:text-red-400">
-                  {error}
-                </div>
-              ) : projects.length === 0 ? (
-                <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                  No projects found
-                </div>
-              ) : (
-                <>
-                  <button
-                    onClick={handleClearSelection}
-                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 ${
-                      selectedProjects.length === 0 ? 'bg-violet-50 dark:bg-violet-900/20' : ''
-                    }`}
-                  >
-                    <div className="font-medium text-gray-900 dark:text-white">
-                      All Projects
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      Show merge requests from all accessible projects
-                    </div>
-                  </button>
-                  {projects.map((project) => (
+            {selectedProjects.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {selectedProjects.map((project) => (
+                  <span key={project.id} className="inline-flex max-w-full items-center gap-1 rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-200">
+                    <span className="max-w-44 truncate">{project.path_with_namespace}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleProjectToggle(project)}
+                      className="rounded-full p-0.5 hover:bg-indigo-100 dark:hover:bg-indigo-300/20"
+                      aria-label={`Remove ${project.path_with_namespace}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="max-h-72 overflow-y-auto" role="listbox">
+            {loading ? (
+              <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">Loading projects…</div>
+            ) : error ? (
+              <div className="p-4 text-center text-sm text-rose-600 dark:text-rose-300">{error}</div>
+            ) : projects.length === 0 ? (
+              <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">No projects found</div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none dark:border-white/10 dark:hover:bg-white/[0.06] dark:focus:bg-white/[0.06] ${
+                    selectedProjects.length === 0 ? 'bg-indigo-50/70 dark:bg-indigo-400/10' : ''
+                  }`}
+                >
+                  <span><span className="block text-sm font-medium text-slate-900 dark:text-white">All projects</span><span className="block text-xs text-slate-500 dark:text-slate-400">Your accessible project scope</span></span>
+                  {selectedProjects.length === 0 && <Check className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />}
+                </button>
+                {projects.map((project) => {
+                  const selected = selectedProjects.some((selectedProject) => selectedProject.id === project.id);
+                  return (
                     <button
                       key={project.id}
+                      type="button"
                       onClick={() => handleProjectToggle(project)}
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0 focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 ${
-                        selectedProjects.some((selectedProject) => selectedProject.id === project.id)
-                          ? 'bg-violet-50 dark:bg-violet-900/20'
-                          : ''
+                      className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none dark:border-white/10 dark:hover:bg-white/[0.06] dark:focus:bg-white/[0.06] ${
+                        selected ? 'bg-indigo-50/70 dark:bg-indigo-400/10' : ''
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">
-                            {project.name}
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {project.path_with_namespace}
-                          </div>
-                        </div>
-                        <div className={`mt-1 flex h-5 w-5 items-center justify-center rounded border ${
-                          selectedProjects.some((selectedProject) => selectedProject.id === project.id)
-                            ? 'border-violet-500 bg-violet-500 text-white'
-                            : 'border-gray-300 dark:border-neutral-600 text-transparent'
-                        }`}>
-                          <Check className="w-3.5 h-3.5" />
-                        </div>
-                      </div>
+                      <span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-900 dark:text-white">{project.name}</span><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{project.path_with_namespace}</span></span>
+                      {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300" />}
                     </button>
-                  ))}
-                </>
-              )}
-            </div>
+                  );
+                })}
+              </>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
