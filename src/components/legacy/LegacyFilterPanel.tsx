@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { FilterOptions } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
-import UserMultiSelect from './UserMultiSelect';
-import { Filter, ChevronDown, Search, Ban, Layers, Calendar, Check } from 'lucide-react';
+import LegacyUserMultiSelect from './LegacyUserMultiSelect';
+import { Filter, ChevronDown, Search, Ban, Layers, Calendar, Trash2, Check } from 'lucide-react';
 
 interface FilterPanelProps {
   filters: FilterOptions;
@@ -14,7 +14,7 @@ interface FilterPanelProps {
   service: GitLabService;
 }
 
-export default function FilterPanel({ filters, onFiltersChange, isExpanded, onToggle, service }: FilterPanelProps) {
+export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded, onToggle, service }: FilterPanelProps) {
   const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
 
   useEffect(() => {
@@ -45,50 +45,47 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
   }).length;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-slate-950/35">
-      <div className="p-5">
+    <div className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl shadow-sm overflow-hidden">
+      <div className="p-6">
         <div className="flex items-center justify-between w-full">
           <button
-            type="button"
             onClick={onToggle}
-            className="group -m-2 flex flex-1 items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.05]"
+            className="flex items-center space-x-3 text-left group hover:bg-gray-50 dark:hover:bg-neutral-800/50 -m-2 p-2 rounded-lg transition-colors flex-1"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300">
-              <Filter className="h-4 w-4" />
+            <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-lg shadow-sm">
+              <Filter className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-slate-950 dark:text-white">
-                  Build this view
+              <div className="flex items-center space-x-2">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Advanced Filters
                 </h3>
                 {activeFiltersCount > 0 && (
-                  <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-200">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200">
                     {activeFiltersCount} active
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Refine scope, people, status, and time.
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Refine your search across all projects
               </p>
             </div>
           </button>
-          <div className="ml-2 flex items-center gap-1">
+          <div className="flex items-center space-x-2 ml-2">
             {activeFiltersCount > 0 && (
               <button
-                type="button"
                 onClick={clearFilters}
-                className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-100"
+                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors"
               >
-                Reset
+                Clear all
               </button>
             )}
             <button
-              type="button"
               onClick={onToggle}
-              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/[0.07] dark:hover:text-slate-200"
+              className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors"
             >
               <ChevronDown
-                className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
               />
             </button>
           </div>
@@ -96,24 +93,24 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
       </div>
 
       {isExpanded && (
-        <div className="border-t border-slate-200 bg-slate-50/70 dark:border-white/10 dark:bg-white/[0.02]">
-          <div className="space-y-6 p-5">
+        <div className="border-t border-gray-100 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900/50">
+          <div className="p-6 space-y-8">
             {/* Quick Filters Section */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                Status & people
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">
+                Quick Filters
               </h4>
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* State Filter */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Merge Request State
                   </label>
                   <div className="relative">
                     <select
                       value={localFilters.state || 'all'}
                       onChange={(e) => handleFilterChange('state', e.target.value as 'opened' | 'closed' | 'merged' | 'all')}
-                      className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full px-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 appearance-none cursor-pointer hover:border-gray-400 dark:hover:border-neutral-500"
                     >
                       <option value="all">All States</option>
                       <option value="opened">🟢 Open</option>
@@ -121,14 +118,14 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                       <option value="closed">🔴 Closed</option>
                     </select>
                     <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <ChevronDown className="h-4 w-4 text-slate-400" />
+                      <ChevronDown className="w-4 h-4 text-gray-400" />
                     </div>
                   </div>
                 </div>
 
                 {/* Authors Filter */}
                 <div className="space-y-2">
-                  <UserMultiSelect
+                  <LegacyUserMultiSelect
                     service={service}
                     selectedUsers={localFilters.authors || []}
                     onUsersChange={(usernames) => handleFilterChange('authors', usernames.length > 0 ? usernames : undefined)}
@@ -140,65 +137,65 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
             </div>
 
             {/* Search & Project Filters */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">
                 Search & Scope
               </h4>
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Title Search */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Search in Title
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Search className="w-4 h-4 text-slate-400" />
+                      <Search className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
                       type="text"
                       value={localFilters.title || ''}
                       onChange={(e) => handleFilterChange('title', e.target.value || undefined)}
                       placeholder="Search merge request titles..."
-                      className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:placeholder:text-slate-500 dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
                     />
                   </div>
                 </div>
 
                 {/* Exclude Title */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Exclude by Title
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Ban className="w-4 h-4 text-slate-400" />
+                      <Ban className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
                       type="text"
                       value={localFilters.excludeTitle || ''}
                       onChange={(e) => handleFilterChange('excludeTitle', e.target.value || undefined)}
                       placeholder="Exclude titles containing..."
-                      className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:placeholder:text-slate-500 dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
                     />
                   </div>
                 </div>
 
                 {/* Projects Filter */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Specific Projects
-                    <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">(when viewing all)</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">(when viewing all)</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Layers className="w-4 h-4 text-slate-400" />
+                      <Layers className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
                       type="text"
                       value={localFilters.projects?.join(', ') || ''}
                       onChange={(e) => handleProjectsChange(e.target.value)}
                       placeholder="project1, group/project2, ..."
-                      className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:placeholder:text-slate-500 dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
                     />
                   </div>
                 </div>
@@ -206,43 +203,43 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
             </div>
 
             {/* Date Range Filters */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">
                 Date Range
               </h4>
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Date From */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Created After
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Calendar className="w-4 h-4 text-slate-400" />
+                      <Calendar className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
                       type="date"
                       value={localFilters.dateFrom || ''}
                       onChange={(e) => handleFilterChange('dateFrom', e.target.value || undefined)}
-                      className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
                     />
                   </div>
                 </div>
 
                 {/* Date To */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Created Before
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Calendar className="w-4 h-4 text-slate-400" />
+                      <Calendar className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
                       type="date"
                       value={localFilters.dateTo || ''}
                       onChange={(e) => handleFilterChange('dateTo', e.target.value || undefined)}
-                      className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
                     />
                   </div>
                 </div>
@@ -250,12 +247,12 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
             </div>
 
             {/* Additional Options */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                More options
+            <div className="space-y-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">
+                Additional Options
               </h4>
               <div className="flex items-center justify-between">
-                <label className="group flex items-center gap-3 cursor-pointer">
+                <label className="flex items-center space-x-3 cursor-pointer group">
                   <div className="relative">
                     <input
                       type="checkbox"
@@ -265,8 +262,8 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                     />
                     <div className={`w-5 h-5 rounded border-2 transition-all duration-200 ${
                       localFilters.draft === true
-                        ? 'border-indigo-600 bg-indigo-600'
-                        : 'border-slate-300 dark:border-slate-600 group-hover:border-indigo-400'
+                        ? 'bg-violet-600 border-violet-600'
+                        : 'border-gray-300 dark:border-neutral-600 group-hover:border-violet-400'
                     }`}>
                       {localFilters.draft === true && (
                         <Check className="w-3 h-3 text-white absolute top-0.5 left-0.5" />
@@ -274,15 +271,24 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
                     </div>
                   </div>
                   <div>
-                    <span className="text-sm font-medium text-slate-700 transition-colors group-hover:text-slate-950 dark:text-slate-300 dark:group-hover:text-white">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
                       Draft Merge Requests Only
                     </span>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
                       Show only merge requests marked as drafts
                     </p>
                   </div>
                 </label>
 
+                {activeFiltersCount > 0 && (
+                  <button
+                    onClick={clearFilters}
+                    className="inline-flex items-center px-4 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-lg border border-gray-200 dark:border-neutral-600 transition-all duration-200 hover:shadow-sm"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Clear All Filters
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -291,3 +297,4 @@ export default function FilterPanel({ filters, onFiltersChange, isExpanded, onTo
     </div>
   );
 }
+

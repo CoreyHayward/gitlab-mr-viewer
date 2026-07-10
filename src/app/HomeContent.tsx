@@ -1,15 +1,45 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Filter, GitBranch, Inbox, Link, LogOut, RefreshCcw, User, Users, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Eye, Filter, GitBranch, Inbox, Link, LogOut, RefreshCcw, User, Users, X } from 'lucide-react';
 import ConfigForm from '@/components/ConfigForm';
 import FilterPanel from '@/components/FilterPanel';
 import MergeDesk, { DeskView } from '@/components/MergeDesk';
 import MergeTrainWatcher from '@/components/MergeTrainWatcher';
 import ProjectSelector from '@/components/ProjectSelector';
+import LegacyWorkspace, { LegacyQuickFilter } from '@/components/legacy/LegacyWorkspace';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
+
+type UIMode = 'classic' | 'desk';
+
+const UI_MODE_KEY = 'gitlab-mr-viewer-ui-mode';
+
+const getSevenDaysAgoISOString = () => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  return sevenDaysAgo.toISOString();
+};
+
+const applyQuickFilter = (
+  filters: FilterOptions,
+  quickFilter: LegacyQuickFilter | null,
+  currentUser: GitLabUser | null
+): FilterOptions => {
+  switch (quickFilter) {
+    case 'my-open-prs':
+      return currentUser ? { ...filters, state: 'opened', authors: [currentUser.username] } : filters;
+    case 'needs-approval':
+      return { ...filters, approvalState: 'needs-review' };
+    case 'not-reviewed-by-me':
+      return { ...filters, notReviewedByMe: true };
+    case 'recently-merged-prs':
+      return { ...filters, state: 'merged', mergedAfter: getSevenDaysAgoISOString() };
+    default:
+      return filters;
+  }
+};
 
 export default function HomeContent() {
   const [service, setService] = useState<GitLabService | null>(null);
@@ -24,13 +54,22 @@ export default function HomeContent() {
   const [isMergeLaneOpen, setIsMergeLaneOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
   const [initialProjectIds, setInitialProjectIds] = useState<number[] | null>(null);
+  const [uiMode, setUIMode] = useState<UIMode>('classic');
+  const [quickFilter, setQuickFilter] = useState<LegacyQuickFilter | null>(null);
+  const [selectedMergeRequestId, setSelectedMergeRequestId] = useState<number | null>(null);
 
   const requestControllerRef = useRef<AbortController | null>(null);
+  const effectiveFilters = useMemo(
+    () => applyQuickFilter(filters, quickFilter, currentUser),
+    [currentUser, filters, quickFilter]
+  );
 
   useEffect(() => {
     const { filters: urlFilters, projectIds } = decodeFiltersFromURL(new URLSearchParams(window.location.search));
     setFilters(urlFilters);
     setInitialProjectIds(projectIds ?? []);
+    const savedMode = localStorage.getItem(UI_MODE_KEY);
+    if (savedMode === 'desk') setUIMode('desk');
   }, []);
 
   useEffect(() => {
@@ -80,10 +119,10 @@ export default function HomeContent() {
 
     try {
       const results = selectedProjects.length === 0
-        ? await service.getAllMergeRequests(filters, controller.signal)
+        ? await service.getAllMergeRequests(effectiveFilters, controller.signal)
         : selectedProjects.length === 1
-          ? await service.getMergeRequests(selectedProjects[0].id, filters, controller.signal)
-          : await service.getMergeRequestsForProjects(selectedProjects.map((project) => project.id), filters, controller.signal);
+          ? await service.getMergeRequests(selectedProjects[0].id, effectiveFilters, controller.signal)
+          : await service.getMergeRequestsForProjects(selectedProjects.map((project) => project.id), effectiveFilters, controller.signal);
 
       if (controller.signal.aborted) return;
       const [approvals, diffStats] = await Promise.allSettled([
@@ -112,7 +151,7 @@ export default function HomeContent() {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [filters, initialProjectIds, selectedProjects, service]);
+  }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
 
   useEffect(() => {
     void loadMergeRequests();
@@ -120,8 +159,8 @@ export default function HomeContent() {
 
   useEffect(() => {
     if (!service || initialProjectIds === null) return;
-    updateURL(filters, selectedProjects.map((project) => project.id));
-  }, [filters, initialProjectIds, selectedProjects, service]);
+    updateURL(effectiveFilters, selectedProjects.map((project) => project.id));
+  }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
 
   useEffect(() => () => requestControllerRef.current?.abort(), []);
 
@@ -131,7 +170,21 @@ export default function HomeContent() {
   };
 
   const handleFiltersChange = (nextFilters: FilterOptions) => {
+    setQuickFilter(null);
     setFilters(nextFilters);
+  };
+
+  const handleQuickFilterToggle = (filter: LegacyQuickFilter) => {
+    setQuickFilter((current) => current === filter ? null : filter);
+  };
+
+  const handleUIModeChange = (mode: UIMode) => {
+    if (mode === 'desk' && quickFilter) {
+      setFilters(effectiveFilters);
+      setQuickFilter(null);
+    }
+    setUIMode(mode);
+    localStorage.setItem(UI_MODE_KEY, mode);
   };
 
   const handleRefresh = () => {
@@ -176,13 +229,35 @@ export default function HomeContent() {
       : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white'
   }`;
 
+  if (!service && uiMode === 'classic') {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-neutral-900">
+        <div className="container mx-auto px-4 py-8">
+          <div className="mb-8 flex justify-end">
+            <button type="button" onClick={() => handleUIModeChange('desk')} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40">
+              <Eye className="h-4 w-4" />Try Merge Desk
+            </button>
+          </div>
+          <div className="mb-8 text-center">
+            <h1 className="mb-4 text-4xl font-bold text-gray-900 dark:text-white">GitLab MR Viewer</h1>
+            <p className="mx-auto max-w-2xl text-lg text-gray-600 dark:text-gray-400">A lightweight, client-side web app for advanced filtering and viewing of GitLab merge requests. Filter by multiple authors, share URLs with your team, and keep your API token secure in your browser.</p>
+          </div>
+          <ConfigForm onConfigured={setService} />
+        </div>
+      </div>
+    );
+  }
+
   if (!service) {
     return (
       <div className="min-h-screen bg-[#f7f7f5] text-slate-950 dark:bg-[#10131b] dark:text-white">
         <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-12">
-          <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-800 dark:text-white">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">M</span>
-            Merge Desk
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-800 dark:text-white">
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">M</span>
+              Merge Desk
+            </div>
+            <button type="button" onClick={() => handleUIModeChange('classic')} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white">Use classic view</button>
           </div>
           <div className="mt-16 grid gap-12 lg:grid-cols-[minmax(0,1fr)_26rem] lg:items-start">
             <div className="max-w-xl pt-4">
@@ -201,6 +276,28 @@ export default function HomeContent() {
     );
   }
 
+  if (uiMode === 'classic') {
+    return (
+      <LegacyWorkspace
+        service={service}
+        selectedProjects={selectedProjects}
+        onProjectsChange={handleProjectsChange}
+        filters={filters}
+        onFiltersChange={handleFiltersChange}
+        mergeRequests={mergeRequests}
+        loading={loading}
+        error={error}
+        currentUser={currentUser}
+        quickFilter={quickFilter}
+        onQuickFilterToggle={handleQuickFilterToggle}
+        onRefresh={handleRefresh}
+        onShare={handleShareURL}
+        onDisconnect={handleDisconnect}
+        onTryMergeDesk={() => handleUIModeChange('desk')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#f7f7f5] text-slate-950 dark:bg-[#10131b] dark:text-white">
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-[#f7f7f5]/90 backdrop-blur dark:border-white/10 dark:bg-[#10131b]/90">
@@ -211,6 +308,9 @@ export default function HomeContent() {
             <ProjectSelector service={service} selectedProjects={selectedProjects} onProjectsChange={handleProjectsChange} />
           </div>
           <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => handleUIModeChange('classic')} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white">
+              <span className="hidden sm:inline">Classic view</span><span className="sm:hidden">Classic</span>
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -270,7 +370,15 @@ export default function HomeContent() {
               <MergeTrainWatcher service={service} onHide={() => setIsMergeLaneOpen(false)} />
             </div>
           ) : (
-            <MergeDesk mergeRequests={mergeRequests} loading={loading} currentUser={currentUser} view={deskView} scopeLabel={scopeLabel} />
+            <MergeDesk
+              mergeRequests={mergeRequests}
+              loading={loading}
+              currentUser={currentUser}
+              view={deskView}
+              scopeLabel={scopeLabel}
+              selectedMergeRequestId={selectedMergeRequestId}
+              onSelectedMergeRequestChange={setSelectedMergeRequestId}
+            />
           )}
         </main>
       </div>

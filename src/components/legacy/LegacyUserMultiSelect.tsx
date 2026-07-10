@@ -14,7 +14,7 @@ interface UserMultiSelectProps {
   label?: string;
 }
 
-export default function UserMultiSelect({ 
+export default function LegacyUserMultiSelect({ 
   service, 
   selectedUsers, 
   onUsersChange, 
@@ -111,18 +111,18 @@ export default function UserMultiSelect({
 
   return (
     <div className="space-y-2">
-      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
         {label}
       </label>
       
       <div className="relative" ref={dropdownRef}>
         {/* Selected users display */}
         {selectedUsers.length > 0 && (
-          <div className="mb-3 flex flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-white/10 dark:bg-white/[0.03]">
+          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-slate-50 dark:bg-neutral-900/10 rounded-lg border border-slate-200 dark:border-neutral-800">
             {selectedUserObjects.map(user => (
               <span
                 key={user.username}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-800 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-100"
+                className="inline-flex items-center px-3 py-1.5 bg-slate-100 dark:bg-neutral-900/30 text-slate-800 dark:text-neutral-200 text-sm rounded-full border border-slate-200 dark:border-neutral-700"
               >
                 <Image
                   src={user.avatar_url}
@@ -132,10 +132,10 @@ export default function UserMultiSelect({
                   className="rounded-full mr-2"
                 />
                 <span className="font-medium">{user.name}</span>
-                <span className="ml-1 text-indigo-600 dark:text-indigo-300">@{user.username}</span>
+                <span className="text-violet-600 dark:text-violet-400 ml-1">@{user.username}</span>
                 <button
                   onClick={() => handleRemoveUser(user.username)}
-                  className="ml-2 rounded-full p-0.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.08] dark:hover:text-slate-100"
+                  className="ml-2 p-0.5 text-slate-600 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-neutral-200 hover:bg-slate-200 dark:hover:bg-neutral-800 rounded-full transition-colors"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -147,12 +147,12 @@ export default function UserMultiSelect({
               .map(username => (
                 <span
                   key={username}
-                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200"
+                  className="inline-flex items-center px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300 text-sm rounded-full border border-gray-200 dark:border-gray-600"
                 >
                   <span className="font-medium">@{username}</span>
                   <button
                     onClick={() => handleRemoveUser(username)}
-                    className="ml-2 rounded-full p-0.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.08] dark:hover:text-slate-100"
+                    className="ml-2 p-0.5 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition-colors"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -164,7 +164,7 @@ export default function UserMultiSelect({
         {/* Search input */}
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <User className="w-4 h-4 text-slate-400" />
+            <User className="w-4 h-4 text-gray-400" />
           </div>
           <input
             type="text"
@@ -172,41 +172,41 @@ export default function UserMultiSelect({
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => setIsOpen(true)}
             placeholder={placeholder}
-            className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:placeholder:text-slate-500 dark:hover:border-white/20 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
           />
           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
             <ChevronDown
-              className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+              className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
             />
           </div>
         </div>
 
         {/* Dropdown */}
         {isOpen && (
-          <div className="absolute z-50 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-white/10 dark:bg-slate-900">
+          <div className="absolute z-50 w-full mt-2 bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-lg shadow-xl max-h-64 overflow-y-auto">
             {loading ? (
               <div className="p-4 text-center">
-                <div className="inline-flex items-center space-x-2 text-slate-500 dark:text-slate-400">
+                <div className="inline-flex items-center space-x-2 text-gray-500 dark:text-gray-400">
                   <Loader2 className="animate-spin w-4 h-4" />
                   <span className="text-sm">Loading users...</span>
                 </div>
               </div>
             ) : availableUsers.length === 0 ? (
               <div className="p-4 text-center">
-                <div className="text-sm text-slate-500 dark:text-slate-400">
+                <div className="text-gray-500 dark:text-gray-400 text-sm">
                   {searchTerm ? (
                     <>
-                      <Search className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                      <Search className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                       No users found matching &ldquo;{searchTerm}&rdquo;
                     </>
                   ) : (
                     <>
-                      <User className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                      <User className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                       Start typing to search users
                     </>
                   )}
                 </div>
-                <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                   Users from your accessible projects and groups
                 </p>
               </div>
@@ -216,7 +216,7 @@ export default function UserMultiSelect({
                   <button
                     key={user.id}
                     onClick={() => handleUserToggle(user.username)}
-                    className="group w-full px-4 py-3 text-left transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none dark:hover:bg-white/[0.06] dark:focus:bg-white/[0.06]"
+                    className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900/20 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-900/20 transition-colors group"
                   >
                     <div className="flex items-center space-x-3">
                       <div className="relative">
@@ -225,19 +225,20 @@ export default function UserMultiSelect({
                           alt={user.name}
                           width={36}
                           height={36}
-                          className="rounded-full border-2 border-slate-200 transition-colors group-hover:border-indigo-200 dark:border-slate-600 dark:group-hover:border-indigo-400/50"
+                          className="rounded-full border-2 border-gray-200 dark:border-gray-600 group-hover:border-slate-200 dark:group-hover:border-slate-700 transition-colors"
                         />
+                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-400 border-2 border-white dark:border-gray-800 rounded-full"></div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-slate-900 transition-colors group-hover:text-indigo-700 dark:text-white dark:group-hover:text-indigo-300">
+                        <div className="font-medium text-gray-900 dark:text-white group-hover:text-slate-900 dark:group-hover:text-slate-100 transition-colors">
                           {user.name}
                         </div>
-                        <div className="text-sm text-slate-500 transition-colors group-hover:text-slate-600 dark:text-slate-400 dark:group-hover:text-slate-300">
+                        <div className="text-sm text-gray-500 dark:text-gray-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
                           @{user.username}
                         </div>
                       </div>
-                      <div className="opacity-0 transition-opacity group-hover:opacity-100">
-                        <Plus className="w-4 h-4 text-indigo-500" />
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Plus className="w-4 h-4 text-violet-500" />
                       </div>
                     </div>
                   </button>
@@ -250,3 +251,4 @@ export default function UserMultiSelect({
     </div>
   );
 }
+

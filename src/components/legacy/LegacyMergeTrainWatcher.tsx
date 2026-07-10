@@ -70,7 +70,7 @@ const saveWatchedProjects = (projects: GitLabProject[]) => {
   }
 };
 
-export default function MergeTrainWatcher({
+export default function LegacyMergeTrainWatcher({
   service,
   onHide,
   trainModeEnabled = false,
@@ -307,17 +307,17 @@ export default function MergeTrainWatcher({
       case 'pending':
         return 'text-amber-700 dark:text-amber-300';
       default:
-        return 'text-slate-500 dark:text-slate-400';
+        return 'text-gray-500 dark:text-gray-400';
     }
   };
 
   const renderTrain = (train: GitLabMergeTrain, index: number) => (
     <div
       key={train.id}
-      className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 text-sm dark:border-white/10 dark:bg-white/[0.025]"
+      className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm dark:border-neutral-700 dark:bg-neutral-900/70"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
           <GitBranch className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{train.target_branch}</span>
         </span>
@@ -329,11 +329,11 @@ export default function MergeTrainWatcher({
         href={train.merge_request.web_url}
         target="_blank"
         rel="noreferrer"
-        className="line-clamp-2 font-medium text-slate-900 hover:text-indigo-700 dark:text-white dark:hover:text-indigo-300"
+        className="line-clamp-2 font-medium text-gray-900 hover:text-violet-700 dark:text-white dark:hover:text-violet-300"
       >
         #{train.merge_request.iid} {train.merge_request.title}
       </a>
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
         <span>Position {index + 1}</span>
         <span>@{train.user.username}</span>
         {train.pipeline && (
@@ -362,16 +362,16 @@ export default function MergeTrainWatcher({
     const clearProjects = watchedProjects.filter((project) => getProjectStatus(project).trains.length === 0);
 
     return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.025]">
+      <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-900 dark:bg-amber-950/20">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-slate-950 dark:text-white">
-              Merge train flow
+            <div className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+              Merge train yard
             </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="text-xs text-amber-800 dark:text-amber-200">
               {trainCars.length > 0
-                ? `${trainCars.length} merge request${trainCars.length === 1 ? '' : 's'} currently moving through a train`
-                : 'No active merge requests in the watched trains'}
+                ? `${trainCars.length} MR car${trainCars.length === 1 ? '' : 's'} making the loop`
+                : 'No active MR cars on the track'}
             </div>
           </div>
           {clearProjects.length > 0 && (
@@ -379,7 +379,7 @@ export default function MergeTrainWatcher({
               {clearProjects.slice(0, 4).map((project) => (
                 <span
                   key={project.id}
-                  className="max-w-56 truncate rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-400/10 dark:text-emerald-200"
+                  className="max-w-56 truncate rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
                 >
                   {project.path_with_namespace} clear
                 </span>
@@ -388,57 +388,86 @@ export default function MergeTrainWatcher({
           )}
         </div>
 
-        <div className="overflow-x-auto pb-1">
-          {trainCars.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-white/70 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-white/[0.035] dark:text-slate-400">
-              Clear across the watched merge lanes.
+        <div className="merge-train-track-scene">
+          <div className="merge-train-track" />
+          <div className="merge-train-ties" />
+          <div className={`merge-train-convoy ${trainCars.length === 0 ? 'merge-train-convoy-idle' : ''}`}>
+            <div className="merge-train-engine">
+              <div className="merge-train-engine-cab" />
+              <div className="merge-train-engine-window" />
+              <div className="merge-train-engine-stripe" />
+              <div className="merge-train-wheel merge-train-wheel-left" />
+              <div className="merge-train-wheel merge-train-wheel-right" />
             </div>
-          ) : (
-            <div className="flex min-w-max items-stretch gap-2">
-              {trainCars.map(({ project, train, trainIndex }, index) => (
+
+            {trainCars.length === 0 ? (
+              <div className="merge-train-empty-car">
+                Clear track
+              </div>
+            ) : (
+              trainCars.map(({ project, train, trainIndex }, index) => (
                 <a
                   key={train.id}
                   href={train.merge_request.web_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="w-56 rounded-lg border border-indigo-200 bg-white p-3 text-slate-900 transition-colors hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-indigo-400/30 dark:bg-slate-950/60 dark:text-white dark:hover:bg-indigo-400/10"
+                  className="merge-train-car"
                   title={`Position ${index + 1}: ${train.merge_request.title}`}
                 >
-                  <span className="flex items-center justify-between gap-2 text-xs">
-                    <span className="font-semibold text-indigo-700 dark:text-indigo-300">Position {trainIndex + 1}</span>
-                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium capitalize text-slate-600 dark:bg-white/[0.08] dark:text-slate-300">{train.status}</span>
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase">
+                      Car {index + 1}
+                    </span>
+                    <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-medium capitalize text-amber-900 dark:bg-black/20 dark:text-amber-100">
+                      {train.status}
+                    </span>
                   </span>
-                  <span className="mt-2 block line-clamp-2 text-sm font-semibold">#{train.merge_request.iid} {train.merge_request.title}</span>
-                  <span className="mt-2 block truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">{project.path_with_namespace}</span>
-                  {train.pipeline && <span className={`mt-2 block text-xs font-medium ${getPipelineTone(train.pipeline.status)}`}>Pipeline {train.pipeline.status}</span>}
+                  <span className="line-clamp-2 text-xs font-semibold">
+                    #{train.merge_request.iid} {train.merge_request.title}
+                  </span>
+                  <span className="truncate text-[10px] font-medium">
+                    {project.path_with_namespace}
+                  </span>
+                  <span className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="truncate">
+                      Position {trainIndex + 1}
+                    </span>
+                    {train.pipeline && (
+                      <span className={`shrink-0 font-semibold ${getPipelineTone(train.pipeline.status)}`}>
+                        {train.pipeline.status}
+                      </span>
+                    )}
+                  </span>
+                  <span className="merge-train-car-wheel merge-train-car-wheel-left" />
+                  <span className="merge-train-car-wheel merge-train-car-wheel-right" />
                 </a>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <section className={`overflow-visible rounded-xl border bg-white dark:bg-slate-950/35 ${
+    <section className={`overflow-visible rounded-xl border bg-white shadow-sm dark:bg-neutral-800 ${
       trainModeEnabled
-        ? 'border-indigo-200 dark:border-indigo-400/30'
-        : 'border-slate-200 dark:border-white/10'
+        ? 'border-amber-200 dark:border-amber-900'
+        : 'border-gray-200 dark:border-neutral-700'
     }`}>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <button
             type="button"
             onClick={handleExpandedToggle}
-            className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-slate-950 xl:cursor-default xl:focus:ring-0"
+            className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-800 xl:cursor-default xl:focus:ring-0"
           >
             <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
               summary.errorCount > 0
-                ? 'bg-rose-50 text-rose-700 dark:bg-rose-400/10 dark:text-rose-200'
+                ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200'
                 : summary.totalTrains > 0
-                  ? 'bg-amber-50 text-amber-800 dark:bg-amber-400/10 dark:text-amber-100'
-                  : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-100'
+                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
             }`}>
               {statusLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : summary.totalTrains > 0 ? <Clock className="h-5 w-5" /> : <CircleCheck className="h-5 w-5" />}
             </div>
@@ -447,17 +476,17 @@ export default function MergeTrainWatcher({
                 <h2
                   onClick={handleTitleClick}
                   title="Merge Train Watcher"
-                  className={`text-base font-semibold text-slate-950 dark:text-white ${trainModeEnabled ? 'text-indigo-800 dark:text-indigo-200' : ''}`}
+                  className={`text-base font-semibold text-gray-900 dark:text-white ${trainModeEnabled ? 'text-amber-800 dark:text-amber-200' : ''}`}
                 >
-                  Merge lane watch
+                  Merge Train Watcher
                 </h2>
                 {watchedProjects.length > 0 && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-600 dark:bg-white/[0.08] dark:text-slate-300">
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-neutral-700 dark:text-gray-300">
                     {summary.totalTrains} queued
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {watchedProjects.length === 0
                   ? 'Pick repos to monitor their active train.'
                   : summary.totalTrains > 0
@@ -472,7 +501,7 @@ export default function MergeTrainWatcher({
               <button
                 type="button"
                 onClick={onHide}
-                className="rounded-md p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-100"
+                className="rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
                 title="Hide merge train watcher"
               >
                 <EyeOff className="h-4 w-4" />
@@ -482,7 +511,7 @@ export default function MergeTrainWatcher({
               type="button"
               onClick={() => refreshStatuses()}
               disabled={statusLoading || watchedProjects.length === 0}
-              className="rounded-md p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-100"
+              className="rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
               title="Refresh merge trains"
             >
               <RefreshCcw className={`h-4 w-4 ${statusLoading ? 'animate-spin' : ''}`} />
@@ -490,7 +519,7 @@ export default function MergeTrainWatcher({
             <button
               type="button"
               onClick={handleExpandedToggle}
-              className="rounded-md p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-100 xl:hidden"
+              className="rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200 xl:hidden"
               title="Toggle merge train watcher"
             >
               <ChevronDown className={`h-5 w-5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -503,33 +532,33 @@ export default function MergeTrainWatcher({
             <button
               type="button"
               onClick={() => setIsPickerOpen((open) => !open)}
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-white/10 dark:bg-white/[0.035] dark:text-slate-200 dark:hover:border-white/20 dark:hover:bg-white/[0.07]"
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-gray-200 dark:hover:border-neutral-600 dark:hover:bg-neutral-900"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <Plus className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300" />
+                <Plus className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
                 <span className="truncate">Add repos to watch</span>
               </span>
-              <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isPickerOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isPickerOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isPickerOpen && (
-              <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-white/10 dark:bg-slate-900">
-                <div className="border-b border-slate-100 p-3 dark:border-white/10">
+              <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
+                <div className="border-b border-gray-100 p-3 dark:border-neutral-700">
                   <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                     <input
                       type="text"
                       value={searchTerm}
                       onChange={(event) => setSearchTerm(event.target.value)}
                       placeholder="Search repos..."
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-400/20"
+                      className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-neutral-600 dark:bg-neutral-700 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div className="max-h-72 overflow-y-auto">
                   {projectLoading ? (
-                    <div className="flex items-center justify-center gap-2 p-4 text-sm text-slate-500 dark:text-slate-400">
+                    <div className="flex items-center justify-center gap-2 p-4 text-sm text-gray-500 dark:text-gray-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Loading repos...
                     </div>
@@ -538,7 +567,7 @@ export default function MergeTrainWatcher({
                       {projectError}
                     </div>
                   ) : projectOptions.length === 0 ? (
-                    <div className="p-4 text-sm text-slate-500 dark:text-slate-400">
+                    <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
                       No repos found
                     </div>
                   ) : (
@@ -550,22 +579,22 @@ export default function MergeTrainWatcher({
                           key={project.id}
                           type="button"
                           onClick={() => handleProjectToggle(project)}
-                          className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none dark:border-white/10 dark:hover:bg-white/[0.06] dark:focus:bg-white/[0.06] ${
-                            selected ? 'bg-indigo-50/70 dark:bg-indigo-400/10' : ''
+                          className={`flex w-full items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:border-neutral-700 dark:hover:bg-neutral-700 dark:focus:bg-neutral-700 ${
+                            selected ? 'bg-violet-50 dark:bg-violet-950/20' : ''
                           }`}
                         >
                           <span className="min-w-0">
-                            <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">
+                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">
                               {project.name}
                             </span>
-                            <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
+                            <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
                               {project.path_with_namespace}
                             </span>
                           </span>
                           <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                             selected
-                            ? 'border-indigo-500 bg-indigo-500 text-white'
-                            : 'border-slate-300 text-transparent dark:border-slate-600'
+                              ? 'border-violet-500 bg-violet-500 text-white'
+                              : 'border-gray-300 text-transparent dark:border-neutral-600'
                           }`}>
                             <Check className="h-3.5 w-3.5" />
                           </span>
@@ -583,10 +612,10 @@ export default function MergeTrainWatcher({
               {watchedProjects.map((project) => {
                 const projectStatus = getProjectStatus(project);
                 const tone = projectStatus.error
-                  ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-400/10 dark:text-rose-200'
+                  ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200'
                   : projectStatus.trains.length > 0
-                    ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-400/10 dark:text-amber-100'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-400/10 dark:text-emerald-200';
+                    ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200';
 
                 return (
                   <span
@@ -608,7 +637,7 @@ export default function MergeTrainWatcher({
               <button
                 type="button"
                 onClick={handleClearAll}
-                className="rounded-full px-2.5 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-slate-100"
+                className="rounded-full px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
               >
                 Clear
               </button>
@@ -616,8 +645,8 @@ export default function MergeTrainWatcher({
           )}
 
           {watchedProjects.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm leading-6 text-slate-500 dark:border-slate-700 dark:text-slate-400">
-              Add the release-critical repos you want to keep in view. This scope stays independent from the review queue.
+            <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500 dark:border-neutral-700 dark:text-gray-400">
+              The watcher is separate from the MR repo selector, so you can monitor release-critical repos without changing the list below.
             </div>
           ) : trainModeEnabled ? (
             <>
@@ -666,18 +695,18 @@ export default function MergeTrainWatcher({
                 }
 
                 return (
-                  <div key={project.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-white/10 dark:bg-white/[0.025]">
+                  <div key={project.id} className="rounded-lg border border-gray-200 p-3 dark:border-neutral-700">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <a
                           href={project.web_url}
                           target="_blank"
                           rel="noreferrer"
-                          className="block truncate text-sm font-semibold text-slate-900 hover:text-indigo-700 dark:text-white dark:hover:text-indigo-300"
+                          className="block truncate text-sm font-semibold text-gray-900 hover:text-violet-700 dark:text-white dark:hover:text-violet-300"
                         >
                           {project.path_with_namespace}
                         </a>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           {projectStatus.trains.length === 0
                             ? 'Train clear'
                             : `${projectStatus.trains.length} in active train`}
@@ -685,8 +714,8 @@ export default function MergeTrainWatcher({
                       </div>
                       <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${
                         projectStatus.trains.length > 0
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-100'
-                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-100'
+                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
                       }`}>
                         {projectStatus.trains.length > 0 ? 'Busy' : 'Clear'}
                       </span>
@@ -704,7 +733,7 @@ export default function MergeTrainWatcher({
           )}
 
           {lastUpdated && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
               <RefreshCcw className="h-3.5 w-3.5" />
               Updated {formatRelativeTime(lastUpdated)}
             </div>
@@ -714,3 +743,4 @@ export default function MergeTrainWatcher({
     </section>
   );
 }
+

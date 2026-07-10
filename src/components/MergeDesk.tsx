@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -29,6 +29,8 @@ interface MergeDeskProps {
   currentUser: GitLabUser | null;
   view: DeskView;
   scopeLabel: string;
+  selectedMergeRequestId?: number | null;
+  onSelectedMergeRequestChange?: (mergeRequestId: number | null) => void;
 }
 
 type RowTone = 'review' | 'blocked' | 'waiting' | 'ready' | 'watch';
@@ -566,10 +568,25 @@ function getGroups(
   ];
 }
 
-export default function MergeDesk({ mergeRequests, loading, currentUser, view, scopeLabel }: MergeDeskProps) {
+export default function MergeDesk({
+  mergeRequests,
+  loading,
+  currentUser,
+  view,
+  scopeLabel,
+  selectedMergeRequestId: controlledSelectedMergeRequestId,
+  onSelectedMergeRequestChange
+}: MergeDeskProps) {
   const groups = useMemo(() => getGroups(mergeRequests, currentUser, view), [mergeRequests, currentUser, view]);
   const mergeRequestsById = useMemo(() => new Map(mergeRequests.map((mergeRequest) => [mergeRequest.id, mergeRequest])), [mergeRequests]);
-  const [selectedMergeRequestId, setSelectedMergeRequestId] = useState<number | null>(null);
+  const [internalSelectedMergeRequestId, setInternalSelectedMergeRequestId] = useState<number | null>(null);
+  const selectedMergeRequestId = controlledSelectedMergeRequestId === undefined
+    ? internalSelectedMergeRequestId
+    : controlledSelectedMergeRequestId;
+  const setSelectedMergeRequestId = useCallback((mergeRequestId: number | null) => {
+    setInternalSelectedMergeRequestId(mergeRequestId);
+    onSelectedMergeRequestChange?.(mergeRequestId);
+  }, [onSelectedMergeRequestChange]);
   const selectedMergeRequest = selectedMergeRequestId === null
     ? null
     : mergeRequestsById.get(selectedMergeRequestId) ?? null;
@@ -578,7 +595,7 @@ export default function MergeDesk({ mergeRequests, loading, currentUser, view, s
     if (selectedMergeRequestId !== null && !mergeRequestsById.has(selectedMergeRequestId)) {
       setSelectedMergeRequestId(null);
     }
-  }, [mergeRequestsById, selectedMergeRequestId]);
+  }, [mergeRequestsById, selectedMergeRequestId, setSelectedMergeRequestId]);
 
   const viewTitle = view === 'inbox' ? 'Today' : view === 'my-work' ? 'My work' : 'Team pulse';
   const attentionCount = groups.slice(0, 2).reduce((total, group) => total + group.mergeRequests.length, 0);

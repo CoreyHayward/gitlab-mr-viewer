@@ -21,8 +21,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
-
-.merge-train-track-scene {
++.merge-train-track-scene {
   position: relative;
   min-height: 360px;
   overflow: hidden;
