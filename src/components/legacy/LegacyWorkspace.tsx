@@ -113,11 +113,8 @@ export default function LegacyWorkspace({
           )}
 
           <main className="min-w-0">
-            <div className="mb-6">
+            <div className="relative z-20 mb-6 flex flex-wrap items-center gap-2">
               <LegacyProjectSelector service={service} selectedProjects={selectedProjects} onProjectsChange={onProjectsChange} />
-            </div>
-
-            <div className="mb-6">
               <LegacyFilterPanel filters={filters} onFiltersChange={onFiltersChange} isExpanded={filtersExpanded} onToggle={toggleFilters} service={service} />
             </div>
 

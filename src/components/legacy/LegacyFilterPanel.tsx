@@ -45,55 +45,16 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
   }).length;
 
   return (
-    <div className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl shadow-sm overflow-hidden">
-      <div className="p-6">
-        <div className="flex items-center justify-between w-full">
-          <button
-            onClick={onToggle}
-            className="flex items-center space-x-3 text-left group hover:bg-gray-50 dark:hover:bg-neutral-800/50 -m-2 p-2 rounded-lg transition-colors flex-1"
-          >
-            <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-lg shadow-sm">
-              <Filter className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  Advanced Filters
-                </h3>
-                {activeFiltersCount > 0 && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200">
-                    {activeFiltersCount} active
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Refine your search across all projects
-              </p>
-            </div>
-          </button>
-          <div className="flex items-center space-x-2 ml-2">
-            {activeFiltersCount > 0 && (
-              <button
-                onClick={clearFilters}
-                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors"
-              >
-                Clear all
-              </button>
-            )}
-            <button
-              onClick={onToggle}
-              className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors"
-            >
-              <ChevronDown
-                className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-              />
-            </button>
-          </div>
-        </div>
-      </div>
+    <div className="relative">
+      <button type="button" onClick={onToggle} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-100 dark:hover:bg-neutral-700" aria-expanded={isExpanded}>
+        <Filter className="h-4 w-4 text-violet-600 dark:text-violet-300" />
+        <span>Advanced filters</span>
+        {activeFiltersCount > 0 && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-violet-800 dark:bg-violet-900/50 dark:text-violet-200">{activeFiltersCount}</span>}
+        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+      </button>
 
       {isExpanded && (
-        <div className="border-t border-gray-100 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900/50">
+        <div className="absolute left-0 z-30 mt-2 w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
           <div className="p-6 space-y-8">
             {/* Quick Filters Section */}
             <div className="space-y-4">
@@ -297,4 +258,3 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
     </div>
   );
 }
-
