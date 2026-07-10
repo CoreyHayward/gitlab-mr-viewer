@@ -278,6 +278,7 @@ function MergeRequestRow({
   return (
     <button
       type="button"
+      data-merge-request
       onClick={onSelect}
       className={`group grid w-full grid-cols-[20px_minmax(0,1fr)_auto] gap-x-3 border-b border-slate-200/80 px-3 py-3.5 text-left transition-colors last:border-b-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 dark:border-white/10 ${
         selected
@@ -389,7 +390,7 @@ function FocusPanel({
       : 'text-slate-700 dark:text-slate-300';
 
   return (
-    <aside className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5 dark:border-white/10 dark:bg-slate-950/45">
+    <aside data-merge-request className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5 dark:border-white/10 dark:bg-slate-950/45">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">

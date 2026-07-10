@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Eye, GitBranch, History, Link, LogOut, RefreshCcw, TriangleAlert, User } from 'lucide-react';
+import { Eye, GitBranch, History, Link, LogOut, TriangleAlert, User } from 'lucide-react';
+import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
 import { loadUIState, saveUIState } from '@/utils/uiState';
@@ -27,6 +28,8 @@ interface LegacyWorkspaceProps {
   onRefresh: () => void;
   onShare: () => void;
   onDisconnect: () => void;
+  autoRefreshEnabled: boolean;
+  onAutoRefreshEnabledChange: (enabled: boolean) => void;
 }
 
 export default function LegacyWorkspace({
@@ -43,7 +46,9 @@ export default function LegacyWorkspace({
   onQuickFilterToggle,
   onRefresh,
   onShare,
-  onDisconnect
+  onDisconnect,
+  autoRefreshEnabled,
+  onAutoRefreshEnabledChange
 }: LegacyWorkspaceProps) {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
@@ -82,9 +87,7 @@ export default function LegacyWorkspace({
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">GitLab MR Viewer</h1>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white/80 p-1.5 shadow-sm backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-800/80">
-            <button type="button" onClick={onRefresh} disabled={loading} className={primaryActionClassName}>
-              <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />{loading ? 'Refreshing...' : 'Refresh'}
-            </button>
+            <AutoRefreshControl loading={loading} onRefresh={onRefresh} autoRefreshEnabled={autoRefreshEnabled} onAutoRefreshEnabledChange={onAutoRefreshEnabledChange} className={primaryActionClassName} />
             {selectedProjects.length > 0 && (
               <button type="button" onClick={onShare} className={secondaryActionClassName}><Link className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />Share URL</button>
             )}

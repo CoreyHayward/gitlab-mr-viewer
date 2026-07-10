@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Filter, GitBranch, Inbox, Link, LogOut, RefreshCcw, User, Users, X } from 'lucide-react';
+import { Eye, Filter, GitBranch, Inbox, Link, LogOut, User, Users, X } from 'lucide-react';
+import AutoRefreshControl from '@/components/AutoRefreshControl';
 import ConfigForm from '@/components/ConfigForm';
 import FilterPanel from '@/components/FilterPanel';
 import MergeDesk, { DeskView } from '@/components/MergeDesk';
@@ -16,6 +17,7 @@ type UIMode = 'classic' | 'desk';
 
 const UI_MODE_KEY = 'gitlab-mr-viewer-ui-mode';
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
+const AUTO_REFRESH_ENABLED_KEY = 'gitlab-mr-viewer-auto-refresh-enabled';
 
 const getSevenDaysAgoISOString = () => {
   const sevenDaysAgo = new Date();
@@ -58,6 +60,8 @@ export default function HomeContent() {
   const [uiMode, setUIMode] = useState<UIMode>('classic');
   const [quickFilter, setQuickFilter] = useState<LegacyQuickFilter | null>(null);
   const [selectedMergeRequestId, setSelectedMergeRequestId] = useState<number | null>(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [isHoveringMergeRequest, setIsHoveringMergeRequest] = useState(false);
 
   const requestControllerRef = useRef<AbortController | null>(null);
   const effectiveFilters = useMemo(
@@ -71,6 +75,7 @@ export default function HomeContent() {
     setInitialProjectIds(projectIds ?? []);
     const savedMode = localStorage.getItem(UI_MODE_KEY);
     if (savedMode === 'desk') setUIMode('desk');
+    setAutoRefreshEnabled(localStorage.getItem(AUTO_REFRESH_ENABLED_KEY) === 'true');
   }, []);
 
   useEffect(() => {
@@ -159,7 +164,7 @@ export default function HomeContent() {
   }, [loadMergeRequests]);
 
   useEffect(() => {
-    if (!service || initialProjectIds === null || initialProjectIds.length > 0 || loading) return;
+    if (!service || initialProjectIds === null || initialProjectIds.length > 0 || loading || !autoRefreshEnabled || isHoveringMergeRequest) return;
 
     const refreshWhenVisible = () => {
       if (document.hidden) return;
@@ -170,7 +175,26 @@ export default function HomeContent() {
 
     const intervalId = window.setInterval(refreshWhenVisible, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [initialProjectIds, loadMergeRequests, loading, service]);
+  }, [autoRefreshEnabled, initialProjectIds, isHoveringMergeRequest, loadMergeRequests, loading, service]);
+
+  useEffect(() => {
+    const isMergeRequestTarget = (target: EventTarget | null) => (
+      target instanceof Element && Boolean(target.closest('[data-merge-request]'))
+    );
+    const handlePointerOver = (event: PointerEvent) => setIsHoveringMergeRequest(isMergeRequestTarget(event.target));
+    const handlePointerOut = (event: PointerEvent) => {
+      if (isMergeRequestTarget(event.target) && !isMergeRequestTarget(event.relatedTarget)) {
+        setIsHoveringMergeRequest(false);
+      }
+    };
+
+    document.addEventListener('pointerover', handlePointerOver);
+    document.addEventListener('pointerout', handlePointerOut);
+    return () => {
+      document.removeEventListener('pointerover', handlePointerOver);
+      document.removeEventListener('pointerout', handlePointerOut);
+    };
+  }, []);
 
   useEffect(() => {
     if (!service || initialProjectIds === null) return;
@@ -206,6 +230,11 @@ export default function HomeContent() {
     service?.clearApprovalCache();
     service?.clearDiffStatsCache();
     void loadMergeRequests();
+  };
+
+  const handleAutoRefreshEnabledChange = (enabled: boolean) => {
+    setAutoRefreshEnabled(enabled);
+    localStorage.setItem(AUTO_REFRESH_ENABLED_KEY, String(enabled));
   };
 
   const handleShareURL = async () => {
@@ -308,6 +337,8 @@ export default function HomeContent() {
         onRefresh={handleRefresh}
         onShare={handleShareURL}
         onDisconnect={handleDisconnect}
+        autoRefreshEnabled={autoRefreshEnabled}
+        onAutoRefreshEnabledChange={handleAutoRefreshEnabledChange}
       />
     );
   }
@@ -338,9 +369,7 @@ export default function HomeContent() {
             <button type="button" onClick={handleShareURL} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white" title="Copy this view's URL">
               <Link className="h-4 w-4" /><span className="hidden sm:inline">Share</span>
             </button>
-            <button type="button" onClick={handleRefresh} disabled={loading} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-500 dark:text-slate-950 dark:hover:bg-indigo-400">
-              <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /><span className="hidden sm:inline">Refresh</span>
-            </button>
+            <AutoRefreshControl loading={loading} onRefresh={handleRefresh} autoRefreshEnabled={autoRefreshEnabled} onAutoRefreshEnabledChange={handleAutoRefreshEnabledChange} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-500 dark:text-slate-950 dark:hover:bg-indigo-400" />
           </div>
         </div>
       </header>

@@ -284,6 +284,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
           return (
             <div
               key={mr.id}
+              data-merge-request
               className="group overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:border-gray-300 hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 dark:hover:border-neutral-600"
             >
               <div className="p-4">
