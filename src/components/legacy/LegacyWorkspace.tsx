@@ -27,7 +27,6 @@ interface LegacyWorkspaceProps {
   onRefresh: () => void;
   onShare: () => void;
   onDisconnect: () => void;
-  onTryMergeDesk: () => void;
 }
 
 export default function LegacyWorkspace({
@@ -44,8 +43,7 @@ export default function LegacyWorkspace({
   onQuickFilterToggle,
   onRefresh,
   onShare,
-  onDisconnect,
-  onTryMergeDesk
+  onDisconnect
 }: LegacyWorkspaceProps) {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
@@ -84,9 +82,6 @@ export default function LegacyWorkspace({
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">GitLab MR Viewer</h1>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white/80 p-1.5 shadow-sm backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-800/80">
-            <button type="button" onClick={onTryMergeDesk} className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40 dark:focus:ring-offset-neutral-900">
-              <Eye className="h-4 w-4" />Try Merge Desk
-            </button>
             <button type="button" onClick={onRefresh} disabled={loading} className={primaryActionClassName}>
               <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />{loading ? 'Refreshing...' : 'Refresh'}
             </button>

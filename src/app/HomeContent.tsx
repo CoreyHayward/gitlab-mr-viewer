@@ -15,6 +15,7 @@ import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
 type UIMode = 'classic' | 'desk';
 
 const UI_MODE_KEY = 'gitlab-mr-viewer-ui-mode';
+const AUTO_REFRESH_INTERVAL_MS = 60_000;
 
 const getSevenDaysAgoISOString = () => {
   const sevenDaysAgo = new Date();
@@ -158,6 +159,20 @@ export default function HomeContent() {
   }, [loadMergeRequests]);
 
   useEffect(() => {
+    if (!service || initialProjectIds === null || initialProjectIds.length > 0 || loading) return;
+
+    const refreshWhenVisible = () => {
+      if (document.hidden) return;
+      service.clearApprovalCache();
+      service.clearDiffStatsCache();
+      void loadMergeRequests();
+    };
+
+    const intervalId = window.setInterval(refreshWhenVisible, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [initialProjectIds, loadMergeRequests, loading, service]);
+
+  useEffect(() => {
     if (!service || initialProjectIds === null) return;
     updateURL(effectiveFilters, selectedProjects.map((project) => project.id));
   }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
@@ -293,7 +308,6 @@ export default function HomeContent() {
         onRefresh={handleRefresh}
         onShare={handleShareURL}
         onDisconnect={handleDisconnect}
-        onTryMergeDesk={() => handleUIModeChange('desk')}
       />
     );
   }
