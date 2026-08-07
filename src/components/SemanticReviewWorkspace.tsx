@@ -4,6 +4,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowUpRight,
   Bot,
   Check,
   ChevronDown,
@@ -581,6 +582,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           <div className="flex items-center gap-2">
             <span className="hidden text-xs font-medium text-slate-500 sm:inline">{reviewedCount}/{sections.length} reviewed</span>
             <span className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 sm:inline dark:bg-white/10"><span className="block h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${progressPercent}%` }} /></span>
+            {workspace.mergeRequest.webUrl && <a href={workspace.mergeRequest.webUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.08] dark:hover:text-white"><span className="hidden sm:inline">Open merge request</span><span className="sm:hidden">Open MR</span><ArrowUpRight className="h-3.5 w-3.5" /></a>}
             <button type="button" onClick={onOpenAiSettings} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${aiConfig ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-200 dark:hover:bg-indigo-500/10' : 'text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-white/[0.08]'}`}><Sparkles className="h-3.5 w-3.5" />{aiConfig ? 'AI settings' : 'Add AI'}</button>
             <button type="button" onClick={() => void loadReview(true)} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-indigo-500 dark:text-slate-950 dark:hover:bg-indigo-400"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />Reorganise</button>
           </div>
