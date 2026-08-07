@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Eye, GitBranch, History, Link, LogOut, TriangleAlert, User } from 'lucide-react';
+import { Eye, GitBranch, History, Link, Settings2, TriangleAlert, User } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
@@ -27,9 +27,10 @@ interface LegacyWorkspaceProps {
   onQuickFilterToggle: (filter: LegacyQuickFilter) => void;
   onRefresh: () => void;
   onShare: () => void;
-  onDisconnect: () => void;
+  onOpenConnectionSettings: () => void;
   autoRefreshEnabled: boolean;
   onAutoRefreshEnabledChange: (enabled: boolean) => void;
+  onStartSemanticReview: (mergeRequest: GitLabMergeRequest) => void;
 }
 
 export default function LegacyWorkspace({
@@ -46,9 +47,10 @@ export default function LegacyWorkspace({
   onQuickFilterToggle,
   onRefresh,
   onShare,
-  onDisconnect,
+  onOpenConnectionSettings,
   autoRefreshEnabled,
-  onAutoRefreshEnabledChange
+  onAutoRefreshEnabledChange,
+  onStartSemanticReview
 }: LegacyWorkspaceProps) {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
@@ -94,7 +96,7 @@ export default function LegacyWorkspace({
             {!mergeTrainWatcherVisible && (
               <button type="button" onClick={() => setMergeTrainVisibility(true)} className={secondaryActionClassName}><GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400" />Merge Trains</button>
             )}
-            <button type="button" onClick={onDisconnect} className={secondaryActionClassName}><LogOut className="h-4 w-4 text-gray-500 dark:text-gray-400" />Disconnect</button>
+            <button type="button" onClick={onOpenConnectionSettings} className={secondaryActionClassName}><Settings2 className="h-4 w-4 text-gray-500 dark:text-gray-400" />Connection settings</button>
           </div>
         </div>
 
@@ -137,7 +139,7 @@ export default function LegacyWorkspace({
               </div>
             )}
 
-            <MergeRequestList mergeRequests={mergeRequests} loading={loading} showProjectInfo={selectedProjects.length !== 1} loadingMessage={selectedProjects.length === 0 ? 'Loading merge requests across all projects...' : selectedProjects.length > 1 ? `Loading merge requests from ${selectedProjects.length} selected projects...` : undefined} />
+            <MergeRequestList mergeRequests={mergeRequests} loading={loading} showProjectInfo={selectedProjects.length !== 1} loadingMessage={selectedProjects.length === 0 ? 'Loading merge requests across all projects...' : selectedProjects.length > 1 ? `Loading merge requests from ${selectedProjects.length} selected projects...` : undefined} onStartSemanticReview={onStartSemanticReview} />
           </main>
 
           {mergeTrainWatcherVisible && !mergeTrainWatcherTrainMode && (

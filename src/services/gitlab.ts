@@ -2,6 +2,8 @@ import {
   GitLabProject,
   GitLabMergeRequest,
   GitLabMergeRequestApprovalStatus,
+  GitLabMergeRequestReviewDetails,
+  GitLabCommitComparison,
   GitLabMergeRequestDiffStats,
   GitLabMergeTrain,
   GitLabMergeTrainProjectStatus,
@@ -36,6 +38,10 @@ export class GitLabService {
   constructor(instanceUrl: string, token: string) {
     this.baseUrl = instanceUrl.endsWith('/') ? instanceUrl.slice(0, -1) : instanceUrl;
     this.token = token;
+  }
+
+  getInstanceUrl(): string {
+    return this.baseUrl;
   }
 
   private async makeRequest<T>(endpoint: string, timeout: number = 30000, externalSignal?: AbortSignal): Promise<T> {
@@ -421,6 +427,32 @@ export class GitLabService {
 
   async getProject(projectId: number, signal?: AbortSignal): Promise<GitLabProject> {
     return this.makeRequest<GitLabProject>(`/projects/${projectId}`, 30000, signal);
+  }
+
+  async getMergeRequestReviewDetails(
+    projectId: number,
+    mergeRequestIid: number,
+    signal?: AbortSignal
+  ): Promise<GitLabMergeRequestReviewDetails> {
+    return this.makeRequest<GitLabMergeRequestReviewDetails>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}/changes?unidiff=true`,
+      30000,
+      signal
+    );
+  }
+
+  async compareMergeRequestCommits(
+    projectId: number,
+    from: string,
+    to: string,
+    signal?: AbortSignal
+  ): Promise<GitLabCommitComparison> {
+    const params = new URLSearchParams({ from, to, straight: 'true' });
+    return this.makeRequest<GitLabCommitComparison>(
+      `/projects/${projectId}/repository/compare?${params.toString()}`,
+      15000,
+      signal
+    );
   }
 
   async getActiveMergeTrains(projectId: number, signal?: AbortSignal): Promise<GitLabMergeTrain[]> {

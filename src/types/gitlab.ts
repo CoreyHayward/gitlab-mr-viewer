@@ -84,6 +84,34 @@ export interface GitLabMergeRequestDiffStats {
   file_count: number;
 }
 
+export interface GitLabMergeRequestChange {
+  old_path?: string;
+  new_path?: string;
+  diff?: string;
+  new_file?: boolean;
+  deleted_file?: boolean;
+  renamed_file?: boolean;
+}
+
+export interface GitLabMergeRequestReviewDetails {
+  iid?: number;
+  title?: string;
+  description?: string | null;
+  author?: Pick<GitLabUser, 'name' | 'username'>;
+  source_branch?: string;
+  target_branch?: string;
+  web_url?: string;
+  sha?: string;
+  diff_refs?: {
+    head_sha?: string;
+  };
+  changes?: GitLabMergeRequestChange[];
+}
+
+export interface GitLabCommitComparison {
+  diffs?: Array<Pick<GitLabMergeRequestChange, 'old_path' | 'new_path' | 'new_file'>>;
+}
+
 export interface GitLabMergeTrain {
   id: number;
   status: string;

@@ -13,6 +13,7 @@ import {
   GitBranch,
   Loader2,
   MessageSquare,
+  Sparkles,
   Tag,
   TriangleAlert,
   User,
@@ -31,6 +32,7 @@ interface MergeDeskProps {
   scopeLabel: string;
   selectedMergeRequestId?: number | null;
   onSelectedMergeRequestChange?: (mergeRequestId: number | null) => void;
+  onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }
 
 type RowTone = 'review' | 'blocked' | 'waiting' | 'ready' | 'watch';
@@ -264,57 +266,62 @@ function MergeRequestRow({
   mergeRequest,
   currentUser,
   selected,
-  onSelect
+  onSelect,
+  onStartSemanticReview
 }: {
   mergeRequest: GitLabMergeRequest;
   currentUser: GitLabUser | null;
   selected: boolean;
   onSelect: () => void;
+  onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }) {
   const signal = getDeskClassification(mergeRequest, currentUser).signal;
   const projectName = mergeRequest.project?.path_with_namespace ?? `Project #${mergeRequest.project_id}`;
   const diffSize = getDiffSize(mergeRequest);
 
   return (
-    <button
-      type="button"
+    <article
       data-merge-request
-      onClick={onSelect}
-      className={`group grid w-full grid-cols-[20px_minmax(0,1fr)_auto] gap-x-3 border-b border-slate-200/80 px-3 py-3.5 text-left transition-colors last:border-b-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 dark:border-white/10 ${
+      className={`group border-b border-slate-200/80 transition-colors last:border-b-0 dark:border-white/10 ${
         selected
           ? 'bg-indigo-50/80 dark:bg-indigo-400/10'
           : 'hover:bg-slate-50 dark:hover:bg-white/[0.035]'
       }`}
     >
-      <div className="pt-1">
-        <UrgencyGlyph tone={signal.tone} />
-      </div>
-      <div className="min-w-0">
-        <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-          <span className="truncate font-mono text-slate-500 dark:text-slate-400">{projectName}</span>
-          <span className="font-mono text-slate-400 dark:text-slate-500">!{mergeRequest.iid}</span>
-          {mergeRequest.draft && <span className="font-medium text-amber-700 dark:text-amber-300">Draft</span>}
+      <button
+        type="button"
+        onClick={onSelect}
+        className="grid w-full grid-cols-[20px_minmax(0,1fr)_auto] gap-x-3 px-3 pb-2 pt-3.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
+      >
+        <div className="pt-1"><UrgencyGlyph tone={signal.tone} /></div>
+        <div className="min-w-0">
+          <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span className="truncate font-mono text-slate-500 dark:text-slate-400">{projectName}</span>
+            <span className="font-mono text-slate-400 dark:text-slate-500">!{mergeRequest.iid}</span>
+            {mergeRequest.draft && <span className="font-medium text-amber-700 dark:text-amber-300">Draft</span>}
+          </div>
+          <div className="truncate text-sm font-semibold text-slate-900 transition-colors group-hover:text-indigo-700 dark:text-white dark:group-hover:text-indigo-300">{mergeRequest.title}</div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+            <span>{mergeRequest.author.name}</span><span aria-hidden="true">·</span><span title={new Date(mergeRequest.updated_at).toLocaleString()}>updated {formatRelativeTime(mergeRequest.updated_at)}</span>
+            {diffSize && <><span aria-hidden="true">·</span><span>{diffSize} change</span></>}
+            {mergeRequest.user_notes_count > 0 && <><span aria-hidden="true">·</span><span className="inline-flex items-center gap-1"><MessageSquare className="h-3 w-3" />{mergeRequest.user_notes_count}</span></>}
+          </div>
         </div>
-        <div className="truncate text-sm font-semibold text-slate-900 transition-colors group-hover:text-indigo-700 dark:text-white dark:group-hover:text-indigo-300">
-          {mergeRequest.title}
+        <div className="flex items-center self-center"><span className={`rounded-md px-2 py-1 text-xs font-medium ${signalStyles[signal.tone].badge}`}>{signal.action}</span></div>
+        <div className="col-start-2 col-end-4 mt-2 truncate text-xs font-medium text-slate-600 dark:text-slate-300">{signal.reason}</div>
+      </button>
+      {onStartSemanticReview && (
+        <div className="flex justify-end px-3 pb-3">
+          <button
+            type="button"
+            onClick={() => onStartSemanticReview(mergeRequest)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200 dark:hover:bg-indigo-500/20"
+          >
+            <Sparkles className="h-3.5 w-3.5" />Guided review
+          </button>
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-          <span>{mergeRequest.author.name}</span>
-          <span aria-hidden="true">·</span>
-          <span title={new Date(mergeRequest.updated_at).toLocaleString()}>updated {formatRelativeTime(mergeRequest.updated_at)}</span>
-          {diffSize && <><span aria-hidden="true">·</span><span>{diffSize} change</span></>}
-          {mergeRequest.user_notes_count > 0 && <><span aria-hidden="true">·</span><span className="inline-flex items-center gap-1"><MessageSquare className="h-3 w-3" />{mergeRequest.user_notes_count}</span></>}
-        </div>
-      </div>
-      <div className="flex items-center self-center">
-        <span className={`rounded-md px-2 py-1 text-xs font-medium ${signalStyles[signal.tone].badge}`}>
-          {signal.action}
-        </span>
-      </div>
-      <div className="col-start-2 col-end-4 mt-2 truncate text-xs font-medium text-slate-600 dark:text-slate-300">
-        {signal.reason}
-      </div>
-    </button>
+      )}
+    </article>
   );
 }
 
@@ -322,12 +329,14 @@ function QueueGroup({
   group,
   currentUser,
   selectedId,
-  onSelect
+  onSelect,
+  onStartSemanticReview
 }: {
   group: DeskGroup;
   currentUser: GitLabUser | null;
   selectedId: number | null;
   onSelect: (mergeRequest: GitLabMergeRequest) => void;
+  onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-slate-950/35">
@@ -349,6 +358,7 @@ function QueueGroup({
               currentUser={currentUser}
               selected={selectedId === mergeRequest.id}
               onSelect={() => onSelect(mergeRequest)}
+              onStartSemanticReview={onStartSemanticReview}
             />
           ))}
         </div>
@@ -362,11 +372,13 @@ function QueueGroup({
 function FocusPanel({
   mergeRequest,
   currentUser,
-  onClose
+  onClose,
+  onStartSemanticReview
 }: {
   mergeRequest: GitLabMergeRequest | null;
   currentUser: GitLabUser | null;
   onClose: () => void;
+  onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }) {
   if (!mergeRequest) {
     return (
@@ -464,6 +476,16 @@ function FocusPanel({
           <span className="truncate font-mono">{mergeRequest.target_branch}</span>
         </div>
       </div>
+
+      {onStartSemanticReview && (
+        <button
+          type="button"
+          onClick={() => onStartSemanticReview(mergeRequest)}
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100 dark:hover:bg-indigo-500/20"
+        >
+          <Sparkles className="h-4 w-4" />Start guided review
+        </button>
+      )}
 
       <a
         href={mergeRequest.web_url}
@@ -576,7 +598,8 @@ export default function MergeDesk({
   view,
   scopeLabel,
   selectedMergeRequestId: controlledSelectedMergeRequestId,
-  onSelectedMergeRequestChange
+  onSelectedMergeRequestChange,
+  onStartSemanticReview
 }: MergeDeskProps) {
   const groups = useMemo(() => getGroups(mergeRequests, currentUser, view), [mergeRequests, currentUser, view]);
   const mergeRequestsById = useMemo(() => new Map(mergeRequests.map((mergeRequest) => [mergeRequest.id, mergeRequest])), [mergeRequests]);
@@ -631,10 +654,11 @@ export default function MergeDesk({
               currentUser={currentUser}
               selectedId={selectedMergeRequestId}
               onSelect={(mergeRequest) => setSelectedMergeRequestId(mergeRequest.id)}
+              onStartSemanticReview={onStartSemanticReview}
             />
           ))}
         </div>
-        <FocusPanel mergeRequest={selectedMergeRequest} currentUser={currentUser} onClose={() => setSelectedMergeRequestId(null)} />
+        <FocusPanel mergeRequest={selectedMergeRequest} currentUser={currentUser} onClose={() => setSelectedMergeRequestId(null)} onStartSemanticReview={onStartSemanticReview} />
       </div>
     </div>
   );

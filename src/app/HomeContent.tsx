@@ -1,14 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Filter, GitBranch, Inbox, Link, LogOut, User, Users, X } from 'lucide-react';
+import { Eye, Filter, GitBranch, Inbox, Link, Settings2, User, Users, X } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
+import ConnectionSettingsModal from '@/components/ConnectionSettingsModal';
 import ConfigForm from '@/components/ConfigForm';
 import FilterPanel from '@/components/FilterPanel';
 import MergeDesk, { DeskView } from '@/components/MergeDesk';
 import MergeTrainWatcher from '@/components/MergeTrainWatcher';
 import ProjectSelector from '@/components/ProjectSelector';
+import SemanticReviewWorkspace from '@/components/SemanticReviewWorkspace';
 import LegacyWorkspace, { LegacyQuickFilter } from '@/components/legacy/LegacyWorkspace';
+import { clearAiProviderConfig, writeAiProviderConfig } from '@/review/storage';
+import type { AiProviderConfig } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
 import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
@@ -62,6 +66,9 @@ export default function HomeContent() {
   const [selectedMergeRequestId, setSelectedMergeRequestId] = useState<number | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [isHoveringMergeRequest, setIsHoveringMergeRequest] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AiProviderConfig | null>(null);
+  const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
+  const [reviewingMergeRequest, setReviewingMergeRequest] = useState<GitLabMergeRequest | null>(null);
 
   const requestControllerRef = useRef<AbortController | null>(null);
   const effectiveFilters = useMemo(
@@ -208,6 +215,47 @@ export default function HomeContent() {
     setInitialProjectIds([]);
   };
 
+  const handleConfigured = useCallback((configuredService: GitLabService, configuredAi: AiProviderConfig | null) => {
+    setService(configuredService);
+    setAiConfig(configuredAi);
+  }, []);
+
+  const handleConnectionSettingsSave = useCallback((
+    configuredService: GitLabService,
+    nextConfig: AiProviderConfig | null,
+    rememberAiSettings: boolean,
+    connectionChanged: boolean,
+    instanceChanged: boolean
+  ) => {
+    setAiConfig(nextConfig);
+    if (nextConfig && rememberAiSettings) {
+      writeAiProviderConfig(nextConfig);
+    } else {
+      clearAiProviderConfig();
+    }
+
+    if (connectionChanged) {
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
+      setService(configuredService);
+      setMergeRequests([]);
+      setCurrentUser(null);
+      setError(null);
+
+      if (instanceChanged) {
+        setSelectedProjects([]);
+        setFilters({ state: 'opened' });
+        setQuickFilter(null);
+        setInitialProjectIds([]);
+        setSelectedMergeRequestId(null);
+        setReviewingMergeRequest(null);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+
+    setIsConnectionSettingsOpen(false);
+  }, []);
+
   const handleFiltersChange = (nextFilters: FilterOptions) => {
     setQuickFilter(null);
     setFilters(nextFilters);
@@ -253,13 +301,27 @@ export default function HomeContent() {
     setSelectedProjects([]);
     setMergeRequests([]);
     setCurrentUser(null);
+    setAiConfig(null);
+    setIsConnectionSettingsOpen(false);
+    setReviewingMergeRequest(null);
     setError(null);
     setFilters({ state: 'opened' });
     setInitialProjectIds([]);
     localStorage.removeItem('gitlab-instance-url');
     localStorage.removeItem('gitlab-token');
+    clearAiProviderConfig();
     window.history.replaceState({}, '', window.location.pathname);
   };
+
+  const connectionSettingsModal = service && isConnectionSettingsOpen ? (
+    <ConnectionSettingsModal
+      service={service}
+      aiConfig={aiConfig}
+      onClose={() => setIsConnectionSettingsOpen(false)}
+      onSave={handleConnectionSettingsSave}
+      onDisconnect={handleDisconnect}
+    />
+  ) : null;
 
   const scopeLabel = selectedProjects.length === 0
     ? 'All accessible projects'
@@ -272,6 +334,22 @@ export default function HomeContent() {
       ? 'bg-indigo-600 text-white shadow-sm'
       : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white'
   }`;
+
+  if (service && reviewingMergeRequest) {
+    return (
+      <>
+        <SemanticReviewWorkspace
+          key={`${reviewingMergeRequest.project_id}-${reviewingMergeRequest.iid}`}
+          service={service}
+          mergeRequest={reviewingMergeRequest}
+          aiConfig={aiConfig}
+          onClose={() => setReviewingMergeRequest(null)}
+          onOpenAiSettings={() => setIsConnectionSettingsOpen(true)}
+        />
+        {connectionSettingsModal}
+      </>
+    );
+  }
 
   if (!service && uiMode === 'classic') {
     return (
@@ -286,7 +364,7 @@ export default function HomeContent() {
             <h1 className="mb-4 text-4xl font-bold text-gray-900 dark:text-white">GitLab MR Viewer</h1>
             <p className="mx-auto max-w-2xl text-lg text-gray-600 dark:text-gray-400">A lightweight, client-side web app for advanced filtering and viewing of GitLab merge requests. Filter by multiple authors, share URLs with your team, and keep your API token secure in your browser.</p>
           </div>
-          <ConfigForm onConfigured={setService} />
+          <ConfigForm onConfigured={handleConfigured} />
         </div>
       </div>
     );
@@ -313,7 +391,7 @@ export default function HomeContent() {
                 <div className="rounded-lg border border-slate-200 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">Your token and GitLab data stay in your browser. Nothing is sent to an app server.</div>
               </div>
             </div>
-            <ConfigForm onConfigured={setService} />
+            <ConfigForm onConfigured={handleConfigured} />
           </div>
         </div>
       </div>
@@ -322,24 +400,28 @@ export default function HomeContent() {
 
   if (uiMode === 'classic') {
     return (
-      <LegacyWorkspace
-        service={service}
-        selectedProjects={selectedProjects}
-        onProjectsChange={handleProjectsChange}
-        filters={filters}
-        onFiltersChange={handleFiltersChange}
-        mergeRequests={mergeRequests}
-        loading={loading}
-        error={error}
-        currentUser={currentUser}
-        quickFilter={quickFilter}
-        onQuickFilterToggle={handleQuickFilterToggle}
-        onRefresh={handleRefresh}
-        onShare={handleShareURL}
-        onDisconnect={handleDisconnect}
-        autoRefreshEnabled={autoRefreshEnabled}
-        onAutoRefreshEnabledChange={handleAutoRefreshEnabledChange}
-      />
+      <>
+        <LegacyWorkspace
+          service={service}
+          selectedProjects={selectedProjects}
+          onProjectsChange={handleProjectsChange}
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+          mergeRequests={mergeRequests}
+          loading={loading}
+          error={error}
+          currentUser={currentUser}
+          quickFilter={quickFilter}
+          onQuickFilterToggle={handleQuickFilterToggle}
+          onRefresh={handleRefresh}
+          onShare={handleShareURL}
+          onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
+          autoRefreshEnabled={autoRefreshEnabled}
+          onAutoRefreshEnabledChange={handleAutoRefreshEnabledChange}
+          onStartSemanticReview={setReviewingMergeRequest}
+        />
+        {connectionSettingsModal}
+      </>
     );
   }
 
@@ -366,6 +448,9 @@ export default function HomeContent() {
             >
               <Filter className="h-4 w-4" /><span className="hidden sm:inline">Explore</span>
             </button>
+            <button type="button" onClick={() => setIsConnectionSettingsOpen(true)} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white">
+              <Settings2 className="h-4 w-4" /><span className="hidden sm:inline">Settings</span>
+            </button>
             <button type="button" onClick={handleShareURL} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.07] dark:hover:text-white" title="Copy this view's URL">
               <Link className="h-4 w-4" /><span className="hidden sm:inline">Share</span>
             </button>
@@ -389,7 +474,7 @@ export default function HomeContent() {
             <p className="mt-1 px-3 text-xs text-slate-400">{mergeRequests.length} loaded merge request{mergeRequests.length === 1 ? '' : 's'}</p>
           </div>
 
-          <button type="button" onClick={handleDisconnect} className="mt-6 hidden w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 lg:flex dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-white"><LogOut className="h-4 w-4" />Disconnect</button>
+          <button type="button" onClick={() => setIsConnectionSettingsOpen(true)} className="mt-6 hidden w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 lg:flex dark:text-slate-400 dark:hover:bg-white/[0.07] dark:hover:text-white"><Settings2 className="h-4 w-4" />Connection settings</button>
         </aside>
 
         <main className="min-w-0">
@@ -421,6 +506,7 @@ export default function HomeContent() {
               scopeLabel={scopeLabel}
               selectedMergeRequestId={selectedMergeRequestId}
               onSelectedMergeRequestChange={setSelectedMergeRequestId}
+              onStartSemanticReview={setReviewingMergeRequest}
             />
           )}
         </main>
@@ -439,6 +525,7 @@ export default function HomeContent() {
           </div>
         </div>
       )}
+      {connectionSettingsModal}
     </div>
   );
 }

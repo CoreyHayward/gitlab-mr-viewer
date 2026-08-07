@@ -12,6 +12,8 @@ A lightweight, client-side web app for advanced filtering and viewing of GitLab 
 🎨 **Clean Interface**: Modern, responsive design that works in light and dark mode  
 ⚡ **Fast & Lightweight**: Built on static export - can be deployed anywhere  
 🔍 **Rich Display**: View merge request details, pipeline status, comments, labels, and more
+🧭 **Guided Semantic Reviews**: Open any merge request in a focused, code-first walkthrough that groups related files into review concepts
+🤖 **Optional Bring-Your-Own AI**: Use OpenAI or another OpenAI-compatible provider to improve semantic grouping and ask questions about the changed code
 
 ## Getting Started
 
@@ -89,6 +91,18 @@ The following files enable GitHub Pages deployment:
    - Click titles to open merge requests in GitLab
    - See pipeline status, assignees, reviewers, labels, and more
 
+5. **Start a Guided Review**:
+   - Select **Guided review** on any merge-request card
+   - Review related code in semantic concepts, keep private notes, flag concerns, and mark concepts reviewed
+   - Progress, notes, and the clipped review diff are saved in this browser only, so reopening the same merge request continues where you left off
+   - Without an AI key, the app uses a local rule-based grouping. Add an optional key in GitLab configuration or **Connection settings** after logging in to have an OpenAI-compatible model refine the grouping and answer questions about the selected changed code
+
+### Optional AI provider
+
+The default API base URL is `https://api.openai.com/v1`, with `gpt-5-mini` as the editable default model. The custom provider URL is hidden until you choose **Use a custom OpenAI-compatible endpoint**. Providers must accept the Chat Completions API and allow browser CORS requests.
+
+The app sends only the merge-request title, description, and a bounded/clipped diff to the selected provider. The API key stays in memory unless you explicitly opt in to remembering it in the browser. OpenAI recommends managing production API keys server-side; use the direct static-app option only with a personal, restricted key on a trusted device.
+
 ## Security & Privacy
 
 - 🔒 **No Server Processing**: All GitLab API calls are made client-side
@@ -96,6 +110,7 @@ The following files enable GitHub Pages deployment:
 - 💾 **Local Storage Only**: Token is stored in your browsers local storage
 - 🌐 **Direct Connection**: Your browser connects directly to GitLab's API
 - 📦 **Static Deployment**: Can be self-hosted on any static hosting service
+- 🧠 **Browser-Only Review State**: Guided review sections, notes, progress, and cached diffs are stored locally and are never written to GitLab or an app server
 
 ## Technology Stack
 

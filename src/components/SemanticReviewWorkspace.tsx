@@ -1,0 +1,599 @@
+'use client';
+
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileCode2,
+  Flag,
+  HelpCircle,
+  Loader2,
+  LockKeyhole,
+  RefreshCw,
+  Send,
+  Sparkles,
+  X
+} from 'lucide-react';
+import { askAiAboutReviewSection, createAiReviewOutline } from '@/review/ai';
+import { createHeuristicReview, normaliseAiReview } from '@/review/organizeReview';
+import { readSemanticReviewCache, semanticReviewCacheKey, writeSemanticReviewCache } from '@/review/storage';
+import type {
+  AiProviderConfig,
+  ReviewDelta,
+  ReviewFileChange,
+  ReviewStatus,
+  SavedReviewState,
+  SemanticReviewWorkspaceData,
+  SemanticSection
+} from '@/review/types';
+import { GitLabService } from '@/services/gitlab';
+import type { GitLabMergeRequest, GitLabMergeRequestChange, GitLabMergeRequestReviewDetails } from '@/types/gitlab';
+
+interface SemanticReviewWorkspaceProps {
+  service: GitLabService;
+  mergeRequest: GitLabMergeRequest;
+  aiConfig: AiProviderConfig | null;
+  onClose: () => void;
+  onOpenAiSettings: () => void;
+}
+
+type ReviewSession = {
+  workspace: SemanticReviewWorkspaceData;
+  state: SavedReviewState;
+};
+
+const MAX_FILES = 90;
+const MAX_DIFF_PER_FILE = 8_000;
+const MAX_DIFF_TOTAL = 260_000;
+
+const statusMeta: Record<ReviewStatus, { label: string; dot: string; pill: string }> = {
+  'not-started': { label: 'Not read yet', dot: 'bg-slate-300 dark:bg-slate-600', pill: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300' },
+  'in-progress': { label: 'Reading now', dot: 'bg-blue-500', pill: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-200' },
+  reviewed: { label: 'Reviewed', dot: 'bg-emerald-500', pill: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200' },
+  'needs-look': { label: 'Flagged', dot: 'bg-amber-500', pill: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100' },
+  blocked: { label: 'Blocking', dot: 'bg-rose-500', pill: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-100' },
+  stale: { label: 'Changed since review', dot: 'bg-violet-500', pill: 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-100' }
+};
+
+const riskMeta = {
+  low: { label: 'Quick skim', classes: 'border-slate-200 bg-slate-100 text-slate-600 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300' },
+  medium: { label: 'Worth a check', classes: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100' },
+  high: { label: 'Look closely', classes: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-100' }
+};
+
+const isTypingTarget = (target: EventTarget | null) => (
+  target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+);
+
+const changedFileKind = (change: GitLabMergeRequestChange): ReviewFileChange['kind'] => {
+  if (change.new_file) return 'added';
+  if (change.deleted_file) return 'deleted';
+  if (change.renamed_file) return 'renamed';
+  return 'modified';
+};
+
+const compactChanges = (changes: GitLabMergeRequestChange[] | undefined) => {
+  const source = Array.isArray(changes) ? changes : [];
+  let used = 0;
+  let truncated = source.length > MAX_FILES;
+  const compacted: ReviewFileChange[] = [];
+
+  for (const change of source.slice(0, MAX_FILES)) {
+    const path = String(change.new_path ?? change.old_path ?? '').trim();
+    if (!path) continue;
+    const rawDiff = String(change.diff ?? '');
+    const remaining = MAX_DIFF_TOTAL - used;
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const diff = rawDiff.slice(0, Math.min(MAX_DIFF_PER_FILE, remaining));
+    if (rawDiff.length > diff.length) truncated = true;
+    used += diff.length;
+    compacted.push({
+      path,
+      oldPath: change.old_path && change.old_path !== path ? change.old_path : undefined,
+      kind: changedFileKind(change),
+      diff
+    });
+  }
+
+  return { changes: compacted, truncated };
+};
+
+const headSha = (raw: GitLabMergeRequestReviewDetails, mergeRequest: GitLabMergeRequest) => {
+  const value = raw.diff_refs?.head_sha ?? raw.sha;
+  return typeof value === 'string' && /^[a-f0-9]{7,80}$/i.test(value) ? value : `mr-${mergeRequest.id}-${mergeRequest.updated_at}`;
+};
+
+const projectPathFor = async (service: GitLabService, mergeRequest: GitLabMergeRequest) => {
+  if (mergeRequest.project?.path_with_namespace) return mergeRequest.project.path_with_namespace;
+  return (await service.getProject(mergeRequest.project_id)).path_with_namespace;
+};
+
+const buildDelta = async (
+  service: GitLabService,
+  mergeRequest: GitLabMergeRequest,
+  previousHeadSha: string | undefined,
+  currentHeadSha: string,
+  signal?: AbortSignal
+): Promise<ReviewDelta> => {
+  if (!previousHeadSha) {
+    return { state: 'first-review', summary: ['This is the first saved review for this merge request.'], changedPaths: [], newPaths: [] };
+  }
+  if (previousHeadSha === currentHeadSha) {
+    return { state: 'unchanged', summary: ['No new commit has landed since this review was last saved.'], changedPaths: [], newPaths: [] };
+  }
+  if (!/^[a-f0-9]{7,80}$/i.test(previousHeadSha) || !/^[a-f0-9]{7,80}$/i.test(currentHeadSha)) {
+    return {
+      state: 'updated',
+      summary: ['The merge request has a new head commit since you last saved this review.', 'Previously reviewed concepts are marked stale conservatively.'],
+      changedPaths: [],
+      newPaths: []
+    };
+  }
+
+  try {
+    const comparison = await service.compareMergeRequestCommits(mergeRequest.project_id, previousHeadSha, currentHeadSha, signal);
+    const diffs = comparison.diffs ?? [];
+    const changedPaths = diffs
+      .map((diff) => String(diff.new_path ?? diff.old_path ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 24);
+    const newPaths = diffs
+      .filter((diff) => diff.new_file)
+      .map((diff) => String(diff.new_path ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    return {
+      state: 'updated',
+      summary: [
+        `${changedPaths.length || diffs.length} ${changedPaths.length === 1 ? 'file changed' : 'files changed'} since you last saved this review.`,
+        ...(newPaths.length ? [`${newPaths.length} ${newPaths.length === 1 ? 'new file was' : 'new files were'} introduced.`] : []),
+        'Previously reviewed concepts touching those files are marked stale.'
+      ],
+      changedPaths,
+      newPaths
+    };
+  } catch {
+    return {
+      state: 'updated',
+      summary: ['The merge request has a new head commit since you last saved this review.', 'The file-by-file delta was unavailable, so reviewed concepts are marked stale conservatively.'],
+      changedPaths: [],
+      newPaths: []
+    };
+  }
+};
+
+const cleanSavedState = (sections: SemanticSection[], saved: SavedReviewState | undefined, delta: ReviewDelta): SavedReviewState => {
+  const sectionIds = new Set(sections.map((section) => section.id));
+  const statuses: SavedReviewState['statuses'] = {};
+  const notes: SavedReviewState['notes'] = {};
+  for (const [id, status] of Object.entries(saved?.statuses ?? {})) {
+    if (sectionIds.has(id)) statuses[id] = status;
+  }
+  for (const [id, note] of Object.entries(saved?.notes ?? {})) {
+    if (sectionIds.has(id) && typeof note === 'string') notes[id] = note;
+  }
+
+  if (delta.state === 'updated') {
+    const changed = new Set(delta.changedPaths);
+    for (const section of sections) {
+      const touched = changed.size === 0 || section.filePaths.some((path) => changed.has(path));
+      if (touched && (statuses[section.id] === 'reviewed' || statuses[section.id] === 'in-progress')) {
+        statuses[section.id] = 'stale';
+      }
+    }
+  }
+
+  const selectedSectionId = saved?.selectedSectionId && sectionIds.has(saved.selectedSectionId)
+    ? saved.selectedSectionId
+    : sections[0]?.id;
+  return { statuses, notes, selectedSectionId };
+};
+
+const parseDiff = (diff: string, limit = 260) => {
+  const lines: Array<{ kind: 'add' | 'remove' | 'meta' | 'context'; text: string; number: number | null }> = [];
+  let lineNumber = 1;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('@@')) {
+      const match = line.match(/\+(\d+)/);
+      if (match) lineNumber = Number.parseInt(match[1], 10);
+      lines.push({ kind: 'meta', text: line, number: null });
+    } else if (line.startsWith('+++') || line.startsWith('---')) {
+      continue;
+    } else if (line.startsWith('+')) {
+      additions += 1;
+      lines.push({ kind: 'add', text: line.slice(1), number: lineNumber });
+      lineNumber += 1;
+    } else if (line.startsWith('-')) {
+      deletions += 1;
+      lines.push({ kind: 'remove', text: line.slice(1), number: null });
+    } else {
+      lines.push({ kind: 'context', text: line.startsWith(' ') ? line.slice(1) : line, number: lineNumber });
+      lineNumber += 1;
+    }
+  }
+  return { lines: lines.slice(0, limit), additions, deletions, clipped: lines.length > limit };
+};
+
+function DiffFile({ file }: { file: ReviewFileChange }) {
+  const [open, setOpen] = useState(true);
+  const parsed = useMemo(() => parseDiff(file.diff), [file.diff]);
+  const kindLabel = file.kind === 'added' ? 'New file' : file.kind === 'deleted' ? 'Deleted' : file.kind === 'renamed' ? 'Renamed' : 'Changed';
+  const kindClass = file.kind === 'added'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200'
+    : file.kind === 'deleted'
+      ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-100'
+      : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300';
+
+  return (
+    <figure className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
+      <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-white/10 dark:hover:bg-white/[0.04]" aria-expanded={open}>
+        <span className="min-w-0">
+          <span className={`mr-2 inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${kindClass}`}>{kindLabel}</span>
+          <code className="break-all text-xs font-medium text-slate-800 dark:text-slate-100">{file.path}</code>
+          {file.oldPath && <span className="mt-1 block break-all text-xs text-slate-400">renamed from {file.oldPath}</span>}
+        </span>
+        <span className="flex shrink-0 items-center gap-2 text-xs font-medium"><span className="text-emerald-600 dark:text-emerald-300">+{parsed.additions}</span><span className="text-rose-600 dark:text-rose-300">−{parsed.deletions}</span>{open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}</span>
+      </button>
+      {open && (
+        <>
+          <pre className="max-h-[38rem] overflow-auto bg-slate-950 py-2 text-xs leading-5 text-slate-200" tabIndex={0} aria-label={`Diff for ${file.path}`}>
+            {parsed.lines.map((line, index) => {
+              const lineClass = line.kind === 'add' ? 'bg-emerald-500/15 text-emerald-100' : line.kind === 'remove' ? 'bg-rose-500/15 text-rose-100' : line.kind === 'meta' ? 'bg-indigo-500/15 text-indigo-200' : '';
+              const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
+              return <span key={`${index}-${line.text}`} className={`grid min-w-max grid-cols-[3.5rem_1.25rem_minmax(0,1fr)] px-3 ${lineClass}`}><span className="select-none pr-3 text-right text-slate-500">{line.number ?? ''}</span><span className="select-none text-slate-500">{marker}</span><span className="whitespace-pre">{line.text || ' '}</span></span>;
+            })}
+            {parsed.clipped && <span className="grid min-w-max grid-cols-[3.5rem_1.25rem_minmax(0,1fr)] px-3 text-slate-400"><span /><span>…</span><span>Diff clipped for this focused first pass</span></span>}
+          </pre>
+          {file.explanation && <figcaption className="border-t border-slate-100 px-4 py-3 text-xs leading-5 text-slate-600 dark:border-white/10 dark:text-slate-300"><strong className="mr-1 font-semibold text-slate-800 dark:text-white">Why this file is here:</strong>{file.explanation}</figcaption>}
+        </>
+      )}
+    </figure>
+  );
+}
+
+function LoadingReview() {
+  return (
+    <div className="min-h-screen bg-[#f7f7f5] px-5 py-12 text-slate-950 dark:bg-[#10131b] dark:text-white">
+      <div className="mx-auto flex max-w-xl flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
+        <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white"><Loader2 className="h-6 w-6 animate-spin" /></span>
+        <p className="mt-5 text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Opening guided review</p>
+        <h1 className="mt-2 text-xl font-semibold">Fetching the current diff and building its walkthrough</h1>
+        <ol className="mt-7 grid w-full gap-2 text-left text-sm text-slate-600 dark:text-slate-300">
+          <li className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2.5 dark:bg-white/[0.05]"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-xs text-white">1</span> Load any saved browser review</li>
+          <li className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2.5 dark:bg-white/[0.05]"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs text-white">2</span> Fetch the latest merge-request diff</li>
+          <li className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2.5 dark:bg-white/[0.05]"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs text-white">3</span> Group files into review concepts</li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfig, onClose, onOpenAiSettings }: SemanticReviewWorkspaceProps) {
+  const [session, setSession] = useState<ReviewSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const questionRef = useRef<HTMLInputElement | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const cacheKey = useMemo(
+    () => semanticReviewCacheKey(service.getInstanceUrl(), mergeRequest.project_id, mergeRequest.iid),
+    [mergeRequest.iid, mergeRequest.project_id, service]
+  );
+
+  const loadReview = useCallback(async (forceOrganize = false) => {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    setAnswer(null);
+    setAskError(null);
+
+    try {
+      const [raw, projectPath] = await Promise.all([
+        service.getMergeRequestReviewDetails(mergeRequest.project_id, mergeRequest.iid, controller.signal),
+        projectPathFor(service, mergeRequest)
+      ]);
+      if (controller.signal.aborted) return;
+      const { changes, truncated } = compactChanges(raw.changes);
+      if (!changes.length) throw new Error('GitLab returned no reviewable changes for this merge request.');
+
+      const previous = readSemanticReviewCache(cacheKey);
+      const currentHeadSha = headSha(raw, mergeRequest);
+      const delta = await buildDelta(service, mergeRequest, previous?.workspace.mergeRequest.headSha, currentHeadSha, controller.signal);
+      if (controller.signal.aborted) return;
+
+      const title = raw.title?.trim() || mergeRequest.title || `Merge request !${mergeRequest.iid}`;
+      const author = raw.author?.name || raw.author?.username || mergeRequest.author.name || 'GitLab author';
+      const metadata = {
+        projectId: mergeRequest.project_id,
+        projectPath,
+        iid: raw.iid ?? mergeRequest.iid,
+        title,
+        author,
+        sourceBranch: raw.source_branch ?? mergeRequest.source_branch,
+        targetBranch: raw.target_branch ?? mergeRequest.target_branch,
+        webUrl: raw.web_url ?? mergeRequest.web_url,
+        headSha: currentHeadSha,
+        changedFiles: Array.isArray(raw.changes) ? raw.changes.length : changes.length
+      };
+
+      const shouldReuseCachedOutline = previous?.workspace.mergeRequest.headSha === currentHeadSha && !forceOrganize && (!aiConfig || previous.workspace.ai.used);
+      let workspace: SemanticReviewWorkspaceData;
+      let aiFailure: string | null = null;
+
+      if (shouldReuseCachedOutline && previous) {
+        workspace = {
+          ...previous.workspace,
+          mergeRequest: metadata,
+          delta,
+          truncated
+        };
+      } else {
+        const fallback = createHeuristicReview(title, changes, raw.description?.slice(0, 3_000) ?? '');
+        let review = fallback;
+        let aiUsed = false;
+        if (aiConfig) {
+          try {
+            const outline = await createAiReviewOutline(aiConfig, {
+              title,
+              description: raw.description?.slice(0, 3_000) ?? '',
+              sourceBranch: metadata.sourceBranch,
+              targetBranch: metadata.targetBranch
+            }, changes, controller.signal);
+            review = normaliseAiReview(outline, fallback, changes);
+            aiUsed = true;
+          } catch (aiError) {
+            if (controller.signal.aborted) return;
+            aiFailure = aiError instanceof Error ? aiError.message : 'AI organisation was unavailable.';
+          }
+        }
+        workspace = {
+          mergeRequest: metadata,
+          review,
+          delta,
+          ai: { configured: Boolean(aiConfig), used: aiUsed },
+          truncated
+        };
+      }
+
+      const state = cleanSavedState(workspace.review.sections, previous?.state, delta);
+      setSession({ workspace, state });
+      setNotice(aiFailure
+        ? `Using local semantic grouping because the AI request did not complete: ${aiFailure}`
+        : null);
+    } catch (loadError) {
+      if (!controller.signal.aborted) {
+        const previous = readSemanticReviewCache(cacheKey);
+        if (previous) {
+          setSession(previous);
+          setNotice('GitLab is unavailable, so this browser is showing your saved review cache.');
+        } else {
+          setError(loadError instanceof Error ? loadError.message : 'Unable to load this merge request for review.');
+        }
+      }
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, [aiConfig, cacheKey, mergeRequest, service]);
+
+  useEffect(() => {
+    void loadReview();
+    return () => controllerRef.current?.abort();
+  }, [loadReview]);
+
+  useEffect(() => {
+    if (!session) return;
+    const persisted = writeSemanticReviewCache(cacheKey, session.workspace, session.state);
+    if (!persisted) {
+      setNotice((current) => current ?? 'This review remains open, but browser storage could not save its full diff.');
+    }
+  }, [cacheKey, session]);
+
+  const workspace = session?.workspace;
+  const sections = useMemo(() => workspace?.review.sections ?? [], [workspace]);
+  const selectedId = session?.state.selectedSectionId ?? sections[0]?.id;
+  const selected = sections.find((section) => section.id === selectedId) ?? sections[0];
+  const selectedIndex = selected ? sections.findIndex((section) => section.id === selected.id) : -1;
+  const reviewedCount = sections.filter((section) => session?.state.statuses[section.id] === 'reviewed').length;
+  const progressPercent = sections.length ? Math.round((reviewedCount / sections.length) * 100) : 0;
+
+  const updateState = useCallback((updater: (state: SavedReviewState) => SavedReviewState) => {
+    setSession((current) => current ? { ...current, state: updater(current.state) } : current);
+  }, []);
+
+  const selectSection = useCallback((id: string) => {
+    updateState((state) => ({
+      ...state,
+      selectedSectionId: id,
+      statuses: state.statuses[id] || state.statuses[id] === 'not-started'
+        ? state.statuses
+        : { ...state.statuses, [id]: 'in-progress' }
+    }));
+    setAnswer(null);
+    setAskError(null);
+  }, [updateState]);
+
+  const setStatus = useCallback((id: string, status: ReviewStatus) => {
+    updateState((state) => ({ ...state, statuses: { ...state.statuses, [id]: status } }));
+  }, [updateState]);
+
+  const setNote = useCallback((note: string) => {
+    if (!selected) return;
+    updateState((state) => ({ ...state, notes: { ...state.notes, [selected.id]: note } }));
+  }, [selected, updateState]);
+
+  const moveNext = useCallback(() => {
+    if (!selected) return;
+    const next = sections[selectedIndex + 1];
+    updateState((state) => ({
+      ...state,
+      statuses: { ...state.statuses, [selected.id]: 'reviewed' },
+      selectedSectionId: next?.id ?? selected.id
+    }));
+    setAnswer(null);
+    setAskError(null);
+  }, [sections, selected, selectedIndex, updateState]);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey || !selected) return;
+      const key = event.key.toLowerCase();
+      if (key === '?') {
+        event.preventDefault();
+        setShowShortcuts((open) => !open);
+      }
+      if (key === 'escape') setShowShortcuts(false);
+      if (key === '/' && aiConfig) {
+        event.preventDefault();
+        questionRef.current?.focus();
+      }
+      if (key === 'j' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        const next = sections[selectedIndex + 1];
+        if (next) selectSection(next.id);
+      }
+      if (key === 'k' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const previous = sections[selectedIndex - 1];
+        if (previous) selectSection(previous.id);
+      }
+      if (key === 'r') {
+        event.preventDefault();
+        moveNext();
+      }
+      if (key === 'f') {
+        event.preventDefault();
+        setStatus(selected.id, 'needs-look');
+      }
+      if (key === 'b') {
+        event.preventDefault();
+        setStatus(selected.id, 'blocked');
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [aiConfig, moveNext, sections, selectSection, selected, selectedIndex, setStatus]);
+
+  const askQuestion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!aiConfig || !selected || !question.trim()) return;
+    setAsking(true);
+    setAskError(null);
+    setAnswer(null);
+    try {
+      const response = await askAiAboutReviewSection(aiConfig, question.trim(), selected);
+      setAnswer(response);
+    } catch (askRequestError) {
+      setAskError(askRequestError instanceof Error ? askRequestError.message : 'Unable to ask the AI about this section.');
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  if (loading && !session) return <LoadingReview />;
+
+  if (!workspace || !selected || !session) {
+    return (
+      <div className="min-h-screen bg-[#f7f7f5] px-5 py-12 text-slate-950 dark:bg-[#10131b] dark:text-white">
+        <div className="mx-auto max-w-xl rounded-2xl border border-rose-200 bg-white p-6 shadow-sm dark:border-rose-500/25 dark:bg-white/[0.035]">
+          <div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 text-rose-600 dark:text-rose-300" /><div><h1 className="font-semibold">Guided review could not open</h1><p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{error ?? 'No reviewable code was returned.'}</p></div></div>
+          <div className="mt-5 flex gap-3"><button type="button" onClick={() => void loadReview()} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Try again</button><button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-white/10">Back to merge requests</button></div>
+        </div>
+      </div>
+    );
+  }
+
+  const selectedStatus = session.state.statuses[selected.id] ?? 'not-started';
+  const relatedFiles = sections
+    .filter((section) => selected.relatedSectionIds.includes(section.id))
+    .flatMap((section) => section.filePaths)
+    .filter((path, index, paths) => paths.indexOf(path) === index && !selected.filePaths.includes(path));
+
+  return (
+    <div className="min-h-screen bg-[#f7f7f5] text-slate-950 dark:bg-[#10131b] dark:text-white">
+      <header className="sticky top-0 z-30 border-b border-slate-200/90 bg-[#f7f7f5]/95 backdrop-blur dark:border-white/10 dark:bg-[#10131b]/95">
+        <div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <button type="button" onClick={onClose} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.08] dark:hover:text-white"><ArrowLeft className="h-4 w-4" /><span className="hidden sm:inline">Merge Desk</span></button>
+            <span className="hidden h-5 w-px bg-slate-200 dark:bg-white/10 sm:block" />
+            <div className="min-w-0"><div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600 text-[11px] font-bold text-white">M</span><span className="text-sm font-semibold">Guided review</span></div><p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{workspace.mergeRequest.projectPath} · !{workspace.mergeRequest.iid}</p></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden text-xs font-medium text-slate-500 sm:inline">{reviewedCount}/{sections.length} reviewed</span>
+            <span className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 sm:inline dark:bg-white/10"><span className="block h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${progressPercent}%` }} /></span>
+            <button type="button" onClick={onOpenAiSettings} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${aiConfig ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-200 dark:hover:bg-indigo-500/10' : 'text-slate-600 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-white/[0.08]'}`}><Sparkles className="h-3.5 w-3.5" />{aiConfig ? 'AI settings' : 'Add AI'}</button>
+            <button type="button" onClick={() => void loadReview(true)} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-indigo-500 dark:text-slate-950 dark:hover:bg-indigo-400"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />Reorganise</button>
+          </div>
+        </div>
+      </header>
+
+      {notice && <div className="mx-auto max-w-[1800px] px-4 pt-4 sm:px-6"><div className="flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2.5 text-xs leading-5 text-indigo-900 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-100"><Bot className="mt-0.5 h-4 w-4 shrink-0" /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} className="ml-auto p-0.5 text-indigo-500 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-white" aria-label="Dismiss notice"><X className="h-4 w-4" /></button></div></div>}
+
+      <div className="mx-auto grid max-w-[1800px] gap-5 px-4 py-5 lg:grid-cols-[17rem_minmax(0,1fr)_20rem] sm:px-6">
+        <aside className="min-w-0 lg:sticky lg:top-[4.75rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
+            <div className="flex items-center justify-between gap-2 px-2 pb-3"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Review map</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sections.length} concepts · {workspace.mergeRequest.changedFiles} files</p></div><button type="button" onClick={() => setShowShortcuts(true)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white" aria-label="Show keyboard shortcuts"><HelpCircle className="h-4 w-4" /></button></div>
+            <nav className="space-y-1" aria-label="Semantic review concepts">
+              {sections.map((section, index) => {
+                const status = session.state.statuses[section.id] ?? 'not-started';
+                const active = section.id === selected.id;
+                return <button key={section.id} type="button" onClick={() => selectSection(section.id)} className={`w-full rounded-xl px-2.5 py-2.5 text-left transition-colors ${active ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-slate-100 dark:hover:bg-white/[0.06]'}`} aria-current={active ? 'step' : undefined}>
+                  <span className="flex items-start gap-2"><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${active ? 'bg-white' : statusMeta[status].dot}`} /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className={`text-[10px] font-bold ${active ? 'text-indigo-100' : 'text-slate-400'}`}>{index + 1}</span><span className="truncate text-sm font-semibold">{section.title}</span></span><span className={`mt-1 flex items-center gap-1 text-[11px] ${active ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'}`}><FileCode2 className="h-3 w-3" />{section.files.length} {section.files.length === 1 ? 'file' : 'files'}<span className={`ml-auto rounded-full border px-1.5 py-0.5 font-semibold ${active ? 'border-white/25 bg-white/10 text-white' : riskMeta[section.risk].classes}`}>{section.risk}</span></span></span></span>
+                </button>;
+              })}
+            </nav>
+          </div>
+        </aside>
+
+        <main className="min-w-0 space-y-5">
+          <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]" open>
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Merge request</p><h1 className="mt-1 text-lg font-semibold tracking-tight text-slate-950 dark:text-white">{workspace.mergeRequest.title}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{workspace.mergeRequest.author} · <code>{workspace.mergeRequest.sourceBranch}</code> → <code>{workspace.mergeRequest.targetBranch}</code></p></div><ChevronDown className="mt-1 h-5 w-5 text-slate-400 transition-transform group-open:rotate-180" /></summary>
+            <div className="border-t border-slate-100 px-5 py-4 text-sm leading-6 text-slate-600 dark:border-white/10 dark:text-slate-300"><p>{workspace.review.overview.purpose}</p><dl className="mt-4 grid gap-3 sm:grid-cols-2"><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Scope</dt><dd className="mt-1">{workspace.review.overview.scope}</dd></div><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Attention</dt><dd className="mt-1">{workspace.review.overview.riskSummary}</dd></div></dl>{workspace.truncated && <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">Large diffs were clipped in this saved review so it remains focused and browser-safe.</p>}{workspace.delta.state === 'updated' && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs leading-5 text-violet-900 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-100"><strong>New commits since your last review</strong><ul className="mt-1 list-disc space-y-0.5 pl-4">{workspace.delta.summary.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>
+          </details>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
+            <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Concept {selectedIndex + 1} of {sections.length}</span><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${riskMeta[selected.risk].classes}`}>{riskMeta[selected.risk].label}</span><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusMeta[selectedStatus].pill}`}>{statusMeta[selectedStatus].label}</span></div>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">{selected.title}</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{selected.intent}</p>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04]"><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">What to check</p><p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-200">{selected.reviewFocus}</p></div>
+          </section>
+
+          <section className="space-y-3" aria-label="Changed code">
+            {selected.files.map((file) => <DiffFile key={file.path} file={file} />)}
+          </section>
+        </main>
+
+        <aside className="space-y-4 lg:sticky lg:top-[4.75rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
+            <div className="flex items-center justify-between gap-3"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Ask about this code</h2>{aiConfig && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300"><Sparkles className="h-3 w-3" />AI</span>}</div>
+            {aiConfig ? <><form onSubmit={askQuestion} className="mt-3 flex gap-2"><input ref={questionRef} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What calls this? Is failure covered?" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><button type="submit" disabled={asking || !question.trim()} className="inline-flex w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" aria-label="Ask AI">{asking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button></form><div className="mt-3 space-y-1">{selected.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setQuestion(prompt); questionRef.current?.focus(); }} className="block w-full rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white">{prompt}</button>)}</div>{(answer || askError) && <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.04]"><div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{askError ? 'Could not answer' : 'Evidence-led answer'}</span><button type="button" onClick={() => { setAnswer(null); setAskError(null); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Dismiss answer"><X className="h-4 w-4" /></button></div>{askError ? <p className="text-rose-700 dark:text-rose-200">{askError}</p> : <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{answer}</p>}<p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Based only on the changed files shown in this concept.</p></div>}</> : <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 dark:border-white/15 dark:bg-white/[0.04]"><div className="flex gap-2"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><div><p className="text-sm font-medium text-slate-700 dark:text-slate-200">AI is optional</p><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Local semantic grouping is active. Add your own provider to ask questions about this changed code.</p><button type="button" onClick={onOpenAiSettings} className="mt-2 text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300">Add AI settings</button></div></div></div>}
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Private note</h2><textarea value={session.state.notes[selected.id] ?? ''} onChange={(event) => setNote(event.target.value)} placeholder="Anything you still need to verify…" rows={5} className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Saved only in this browser. Never sent to GitLab.</p></section>
+
+          {relatedFiles.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Related code</h2><ul className="mt-3 space-y-1.5">{relatedFiles.map((path) => <li key={path} className="break-all rounded-lg bg-slate-50 px-2 py-1.5 font-mono text-xs text-slate-600 dark:bg-white/[0.04] dark:text-slate-300">{path}</li>)}</ul></section>}
+        </aside>
+      </div>
+
+      <footer className="sticky bottom-0 z-20 border-t border-slate-200 bg-[#f7f7f5]/95 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-[#10131b]/95 sm:px-6"><div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${statusMeta[selectedStatus].dot}`} />{selected.files.length} {selected.files.length === 1 ? 'file' : 'files'} in view</span><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStatus(selected.id, 'needs-look')} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 dark:border-amber-500/25 dark:bg-white/[0.04] dark:text-amber-100 dark:hover:bg-amber-500/10"><Flag className="h-3.5 w-3.5" />Flag <kbd className="hidden rounded bg-amber-100 px-1 font-mono text-[10px] sm:inline dark:bg-amber-500/15">F</kbd></button><button type="button" onClick={() => setStatus(selected.id, 'blocked')} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 dark:border-rose-500/25 dark:bg-white/[0.04] dark:text-rose-100 dark:hover:bg-rose-500/10"><AlertTriangle className="h-3.5 w-3.5" />Block <kbd className="hidden rounded bg-rose-100 px-1 font-mono text-[10px] sm:inline dark:bg-rose-500/15">B</kbd></button><button type="button" onClick={moveNext} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"><Check className="h-3.5 w-3.5" />{selectedIndex === sections.length - 1 ? 'Mark reviewed' : 'Reviewed, next'} <kbd className="hidden rounded bg-white/15 px-1 font-mono text-[10px] sm:inline">R</kbd></button></div></div></footer>
+
+      {showShortcuts && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"><div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-[#f7f7f5] p-5 shadow-2xl dark:border-white/10 dark:bg-[#10131b]"><div className="flex items-center justify-between"><h2 className="font-semibold">Keyboard shortcuts</h2><button type="button" onClick={() => setShowShortcuts(false)} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Close shortcuts"><X className="h-5 w-5" /></button></div><dl className="mt-4 grid grid-cols-[3rem_1fr] gap-y-3 text-sm text-slate-600 dark:text-slate-300"><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">J/K</kbd></dt><dd>Next / previous concept</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">R</kbd></dt><dd>Mark reviewed and move on</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">F/B</kbd></dt><dd>Flag / mark blocking</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">/</kbd></dt><dd>Ask AI about selected code</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">?</kbd></dt><dd>Toggle this guide</dd></dl></div></div>}
+    </div>
+  );
+}

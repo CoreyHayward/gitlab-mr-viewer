@@ -2,16 +2,17 @@
 
 import { GitLabMergeRequest } from '@/types/gitlab';
 import { getApprovalCategory } from '@/utils/approvalState';
-import { CircleCheck, Check, X, Loader2, Clock, Info, MessageSquare, GitBranch, ArrowRight, TriangleAlert, User, Eye, Tag, FileText } from 'lucide-react';
+import { CircleCheck, Check, X, Loader2, Clock, Info, MessageSquare, GitBranch, ArrowRight, TriangleAlert, User, Eye, Tag, FileText, Sparkles } from 'lucide-react';
 
 interface MergeRequestListProps {
   mergeRequests: GitLabMergeRequest[];
   loading: boolean;
   showProjectInfo?: boolean; // New prop to control whether to show project info
   loadingMessage?: string; // Custom loading message
+  onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }
 
-export default function MergeRequestList({ mergeRequests, loading, showProjectInfo = false, loadingMessage }: MergeRequestListProps) {
+export default function MergeRequestList({ mergeRequests, loading, showProjectInfo = false, loadingMessage, onStartSemanticReview }: MergeRequestListProps) {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, {
       year: 'numeric',
@@ -288,7 +289,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
               className="group overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:border-gray-300 hover:shadow-md dark:border-neutral-700 dark:bg-neutral-800 dark:hover:border-neutral-600"
             >
               <div className="p-4">
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                   {mr.state === 'opened' && reviewSummary ? (
@@ -372,6 +373,15 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
                   </div>
                 </div>
               </div>
+              {onStartSemanticReview && (
+                <button
+                  type="button"
+                  onClick={() => onStartSemanticReview(mr)}
+                  className="inline-flex shrink-0 items-center gap-1.5 self-start whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200 dark:hover:bg-indigo-500/20"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />Guided review
+                </button>
+              )}
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 text-sm text-gray-600 dark:border-neutral-700/70 dark:text-gray-400">
