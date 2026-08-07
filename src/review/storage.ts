@@ -76,10 +76,23 @@ const isSavedReviewState = (value: unknown): value is SavedReviewState => {
   return Boolean(candidate.statuses && typeof candidate.statuses === 'object' && candidate.notes && typeof candidate.notes === 'object');
 };
 
+const isCachedDiscussion = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as { id?: unknown; notes?: unknown };
+  return typeof candidate.id === 'string' && Array.isArray(candidate.notes) && candidate.notes.every((note) => Boolean(note && typeof note === 'object'));
+};
+
 const isWorkspace = (value: unknown): value is SemanticReviewWorkspaceData => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<SemanticReviewWorkspaceData>;
-  return Boolean(candidate.mergeRequest && candidate.review && Array.isArray(candidate.review.sections) && candidate.delta && candidate.ai);
+  return Boolean(
+    candidate.mergeRequest &&
+    candidate.review &&
+    Array.isArray(candidate.review.sections) &&
+    candidate.delta &&
+    candidate.ai &&
+    (candidate.discussions === undefined || (Array.isArray(candidate.discussions) && candidate.discussions.every(isCachedDiscussion)))
+  );
 };
 
 export function readSemanticReviewCache(key: string): CachedSemanticReview | null {

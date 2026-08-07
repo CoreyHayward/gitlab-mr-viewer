@@ -3,6 +3,9 @@ import {
   GitLabMergeRequest,
   GitLabMergeRequestApprovalStatus,
   GitLabMergeRequestReviewDetails,
+  GitLabMergeRequestDiscussion,
+  GitLabDiscussionNote,
+  GitLabDiscussionPosition,
   GitLabCommitComparison,
   GitLabMergeRequestDiffStats,
   GitLabMergeTrain,
@@ -450,6 +453,64 @@ export class GitLabService {
       `/projects/${projectId}/merge_requests/${mergeRequestIid}/changes?unidiff=true`,
       30000,
       signal
+    );
+  }
+
+  async getMergeRequestDiscussions(
+    projectId: number,
+    mergeRequestIid: number,
+    signal?: AbortSignal
+  ): Promise<GitLabMergeRequestDiscussion[]> {
+    const discussions: GitLabMergeRequestDiscussion[] = [];
+    const pageSize = 100;
+    for (let page = 1; page <= 100; page += 1) {
+      const batch = await this.makeRequest<GitLabMergeRequestDiscussion[]>(
+        `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions?per_page=${pageSize}&page=${page}`,
+        30000,
+        signal
+      );
+      discussions.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return discussions;
+  }
+
+  async createMergeRequestDiscussion(
+    projectId: number,
+    mergeRequestIid: number,
+    body: string,
+    position?: GitLabDiscussionPosition,
+    signal?: AbortSignal
+  ): Promise<GitLabMergeRequestDiscussion> {
+    return this.makeRequest<GitLabMergeRequestDiscussion>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions`,
+      30000,
+      signal,
+      {
+        method: 'POST',
+        body: {
+          body,
+          ...(position ? { position } : {})
+        }
+      }
+    );
+  }
+
+  async addMergeRequestDiscussionNote(
+    projectId: number,
+    mergeRequestIid: number,
+    discussionId: string,
+    body: string,
+    signal?: AbortSignal
+  ): Promise<GitLabDiscussionNote> {
+    return this.makeRequest<GitLabDiscussionNote>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions/${encodeURIComponent(discussionId)}/notes`,
+      30000,
+      signal,
+      {
+        method: 'POST',
+        body: { body }
+      }
     );
   }
 

@@ -14,12 +14,23 @@ import {
   HelpCircle,
   Loader2,
   LockKeyhole,
+  MessageSquare,
+  MessageSquarePlus,
   RefreshCw,
   Send,
   Sparkles,
   X
 } from 'lucide-react';
 import { askAiAboutReviewSection, createAiReviewOutline } from '@/review/ai';
+import {
+  createDiscussionPosition,
+  normalizeDiscussions,
+  parseDiff,
+  threadLineIndexes,
+  threadLocationLabel,
+  type InlineReviewThread,
+  type ParsedDiffLine
+} from '@/review/comments';
 import { createHeuristicReview, normaliseAiReview } from '@/review/organizeReview';
 import { readSemanticReviewCache, semanticReviewCacheKey, writeSemanticReviewCache } from '@/review/storage';
 import type {
@@ -32,7 +43,12 @@ import type {
   SemanticSection
 } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
-import type { GitLabMergeRequest, GitLabMergeRequestChange, GitLabMergeRequestReviewDetails } from '@/types/gitlab';
+import type {
+  GitLabDiscussionNote,
+  GitLabMergeRequest,
+  GitLabMergeRequestChange,
+  GitLabMergeRequestReviewDetails
+} from '@/types/gitlab';
 
 interface SemanticReviewWorkspaceProps {
   service: GitLabService;
@@ -113,6 +129,8 @@ const headSha = (raw: GitLabMergeRequestReviewDetails, mergeRequest: GitLabMerge
   const value = raw.diff_refs?.head_sha ?? raw.sha;
   return typeof value === 'string' && /^[a-f0-9]{7,80}$/i.test(value) ? value : `mr-${mergeRequest.id}-${mergeRequest.updated_at}`;
 };
+
+const validSha = (value: string | undefined): value is string => Boolean(value && /^[a-f0-9]{7,80}$/i.test(value));
 
 const projectPathFor = async (service: GitLabService, mergeRequest: GitLabMergeRequest) => {
   if (mergeRequest.project?.path_with_namespace) return mergeRequest.project.path_with_namespace;
@@ -202,34 +220,97 @@ const cleanSavedState = (sections: SemanticSection[], saved: SavedReviewState | 
   return { statuses, notes, selectedSectionId };
 };
 
-const parseDiff = (diff: string, limit = 260) => {
-  const lines: Array<{ kind: 'add' | 'remove' | 'meta' | 'context'; text: string; number: number | null }> = [];
-  let lineNumber = 1;
-  let additions = 0;
-  let deletions = 0;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('@@')) {
-      const match = line.match(/\+(\d+)/);
-      if (match) lineNumber = Number.parseInt(match[1], 10);
-      lines.push({ kind: 'meta', text: line, number: null });
-    } else if (line.startsWith('+++') || line.startsWith('---')) {
-      continue;
-    } else if (line.startsWith('+')) {
-      additions += 1;
-      lines.push({ kind: 'add', text: line.slice(1), number: lineNumber });
-      lineNumber += 1;
-    } else if (line.startsWith('-')) {
-      deletions += 1;
-      lines.push({ kind: 'remove', text: line.slice(1), number: null });
-    } else {
-      lines.push({ kind: 'context', text: line.startsWith(' ') ? line.slice(1) : line, number: lineNumber });
-      lineNumber += 1;
-    }
-  }
-  return { lines: lines.slice(0, limit), additions, deletions, clipped: lines.length > limit };
+type CommentDraft = {
+  file: ReviewFileChange;
+  start: ParsedDiffLine;
+  end: ParsedDiffLine;
 };
 
-function DiffFile({ file }: { file: ReviewFileChange }) {
+type RangeStart = {
+  filePath: string;
+  line: ParsedDiffLine;
+};
+
+type CommentComposerProps = {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+  saving: boolean;
+  error: string | null;
+  autoFocus?: boolean;
+};
+
+function CommentComposer({ label, value, onChange, onSubmit, onCancel, saving, error, autoFocus = false }: CommentComposerProps) {
+  return (
+    <form onSubmit={onSubmit} className="mt-2 rounded-xl border border-indigo-200 bg-white p-3 text-slate-950 shadow-lg dark:border-indigo-400/30 dark:bg-slate-900 dark:text-white">
+      <div className="flex items-center justify-between gap-3"><span className="text-xs font-bold uppercase tracking-[0.14em] text-indigo-700 dark:text-indigo-300">{label}</span><button type="button" onClick={onCancel} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white" aria-label="Cancel comment"><X className="h-4 w-4" /></button></div>
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} autoFocus={autoFocus} rows={4} placeholder="Leave a clear, actionable comment…" className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" aria-label={label} />
+      {error && <p className="mt-2 text-xs leading-5 text-rose-700 dark:text-rose-200" role="alert">{error}</p>}
+      <div className="mt-3 flex items-center justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">Cancel</button><button type="submit" disabled={saving || !value.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}{saving ? 'Posting…' : 'Post comment'}</button></div>
+    </form>
+  );
+}
+
+type ThreadCardProps = {
+  thread: InlineReviewThread;
+  replyThreadId: string | null;
+  replyText: string;
+  replyError: string | null;
+  replySaving: boolean;
+  onStartReply: (threadId: string) => void;
+  onReplyTextChange: (value: string) => void;
+  onSubmitReply: (event: FormEvent<HTMLFormElement>, threadId: string) => void;
+  onCancelReply: () => void;
+};
+
+const noteAuthor = (note: GitLabDiscussionNote) => note.author?.name || note.author?.username || 'GitLab user';
+
+function ThreadCard({ thread, replyThreadId, replyText, replyError, replySaving, onStartReply, onReplyTextChange, onSubmitReply, onCancelReply }: ThreadCardProps) {
+  const rootNote = thread.discussion.notes[0];
+  if (!rootNote) return null;
+
+  return (
+    <article className={`mt-2 rounded-xl border p-3 text-left shadow-sm ${thread.stale ? 'border-violet-300 bg-violet-50/95 dark:border-violet-400/35 dark:bg-violet-950/45' : 'border-slate-200 bg-white dark:border-white/15 dark:bg-slate-900/95'}`} aria-label={`Discussion ${threadLocationLabel(thread)}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700 dark:bg-indigo-400/15 dark:text-indigo-200">{noteAuthor(rootNote).slice(0, 1).toUpperCase()}</span><span className="truncate text-xs font-semibold text-slate-800 dark:text-slate-100">{noteAuthor(rootNote)}</span><span className="text-[11px] text-slate-400">{rootNote.created_at ? new Date(rootNote.created_at).toLocaleDateString() : ''}</span></div>
+        <span className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><span className={thread.stale ? 'text-violet-700 dark:text-violet-200' : thread.resolved ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400'}>{thread.stale ? 'Stale diff' : thread.resolved ? 'Resolved' : threadLocationLabel(thread)}</span></span>
+      </div>
+      {thread.stale && <p className="mt-2 rounded-lg border border-violet-200 bg-white/60 px-2.5 py-2 text-[11px] leading-5 text-violet-900 dark:border-violet-400/20 dark:bg-white/[0.04] dark:text-violet-100">This thread is attached to an older version of the diff. Read-only placement is preserved here so the conversation is not lost.</p>}
+      <div className="mt-3 space-y-3">{thread.discussion.notes.map((note, index) => <div key={note.id} className={index === 0 ? '' : 'border-t border-slate-200 pt-3 dark:border-white/10'}><div className="mb-1 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400"><span className="font-semibold text-slate-700 dark:text-slate-200">{noteAuthor(note)}</span><span>·</span><span>{note.created_at ? new Date(note.created_at).toLocaleDateString() : ''}</span>{note.system && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold dark:bg-white/10">System</span>}</div><p className="whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">{note.body}</p></div>)}</div>
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-200 pt-2.5 dark:border-white/10"><span className="text-[11px] text-slate-400">{thread.discussion.notes.length} {thread.discussion.notes.length === 1 ? 'comment' : 'comments'}</span><button type="button" onClick={() => onStartReply(thread.id)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10"><MessageSquare className="h-3.5 w-3.5" />Reply</button></div>
+      {replyThreadId === thread.id && <CommentComposer label="Reply to thread" value={replyText} onChange={onReplyTextChange} onSubmit={(event) => onSubmitReply(event, thread.id)} onCancel={onCancelReply} saving={replySaving} error={replyError} />}
+    </article>
+  );
+}
+
+type DiffFileProps = {
+  file: ReviewFileChange;
+  threads: InlineReviewThread[];
+  rangeMode: boolean;
+  rangeStart: RangeStart | null;
+  draft: CommentDraft | null;
+  commentText: string;
+  commentError: string | null;
+  commentSaving: boolean;
+  replyThreadId: string | null;
+  replyText: string;
+  replyError: string | null;
+  replySaving: boolean;
+  commentsEnabled: boolean;
+  onLineAction: (line: ParsedDiffLine, shiftKey: boolean) => void;
+  onToggleRange: () => void;
+  onCommentTextChange: (value: string) => void;
+  onSubmitComment: (event: FormEvent<HTMLFormElement>) => void;
+  onCancelComment: () => void;
+  onStartReply: (threadId: string) => void;
+  onReplyTextChange: (value: string) => void;
+  onSubmitReply: (event: FormEvent<HTMLFormElement>, threadId: string) => void;
+  onCancelReply: () => void;
+};
+
+function DiffFile({ file, threads, rangeMode, rangeStart, draft, commentText, commentError, commentSaving, replyThreadId, replyText, replyError, replySaving, commentsEnabled, onLineAction, onToggleRange, onCommentTextChange, onSubmitComment, onCancelComment, onStartReply, onReplyTextChange, onSubmitReply, onCancelReply }: DiffFileProps) {
   const [open, setOpen] = useState(true);
   const parsed = useMemo(() => parseDiff(file.diff), [file.diff]);
   const kindLabel = file.kind === 'added' ? 'New file' : file.kind === 'deleted' ? 'Deleted' : file.kind === 'renamed' ? 'Renamed' : 'Changed';
@@ -241,24 +322,41 @@ function DiffFile({ file }: { file: ReviewFileChange }) {
 
   return (
     <figure className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
-      <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-white/10 dark:hover:bg-white/[0.04]" aria-expanded={open}>
-        <span className="min-w-0">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-white/10">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="min-w-0 text-left" aria-expanded={open}>
           <span className={`mr-2 inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${kindClass}`}>{kindLabel}</span>
           <code className="break-all text-xs font-medium text-slate-800 dark:text-slate-100">{file.path}</code>
           {file.oldPath && <span className="mt-1 block break-all text-xs text-slate-400">renamed from {file.oldPath}</span>}
-        </span>
-        <span className="flex shrink-0 items-center gap-2 text-xs font-medium"><span className="text-emerald-600 dark:text-emerald-300">+{parsed.additions}</span><span className="text-rose-600 dark:text-rose-300">−{parsed.deletions}</span>{open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}</span>
-      </button>
+        </button>
+        <div className="flex shrink-0 items-center gap-2"><span className="text-xs font-medium"><span className="text-emerald-600 dark:text-emerald-300">+{parsed.additions}</span><span className="ml-2 text-rose-600 dark:text-rose-300">−{parsed.deletions}</span></span><button type="button" onClick={onToggleRange} disabled={!commentsEnabled} className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${rangeMode ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-400/35 dark:bg-indigo-500/10 dark:text-indigo-200' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/[0.06]'} disabled:cursor-not-allowed disabled:opacity-50`}>{rangeStart?.filePath === file.path ? 'Choose end line' : 'Select range'}</button>{open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}</div>
+      </div>
       {open && (
         <>
-          <pre className="max-h-[38rem] overflow-auto bg-slate-950 py-2 text-xs leading-5 text-slate-200" tabIndex={0} aria-label={`Diff for ${file.path}`}>
-            {parsed.lines.map((line, index) => {
+          <div className="max-h-[42rem] overflow-x-hidden overflow-y-auto bg-slate-950 py-2 text-xs leading-5 text-slate-200" tabIndex={0} aria-label={`Diff for ${file.path}`}>
+            {parsed.lines.map((line) => {
               const lineClass = line.kind === 'add' ? 'bg-emerald-500/15 text-emerald-100' : line.kind === 'remove' ? 'bg-rose-500/15 text-rose-100' : line.kind === 'meta' ? 'bg-indigo-500/15 text-indigo-200' : '';
               const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
-              return <span key={`${index}-${line.text}`} className={`grid min-w-max grid-cols-[3.5rem_1.25rem_minmax(0,1fr)] px-3 ${lineClass}`}><span className="select-none pr-3 text-right text-slate-500">{line.number ?? ''}</span><span className="select-none text-slate-500">{marker}</span><span className="whitespace-pre">{line.text || ' '}</span></span>;
+              const threadRows = threads.filter((thread) => {
+                const indexes = threadLineIndexes(parsed.allLines, thread);
+                const index = parsed.allLines.findIndex((candidate) => candidate.id === line.id);
+                return indexes && index === indexes.end;
+              });
+              const draftEnd = draft?.file.path === file.path && draft.end.id === line.id;
+              const rangeIndices = rangeStart?.filePath === file.path && rangeStart.line.id !== line.id
+                ? threadLineIndexes(parsed.allLines, { start: { type: rangeStart.line.kind === 'remove' ? 'old' : 'new', line: (rangeStart.line.kind === 'remove' ? rangeStart.line.oldLine : rangeStart.line.newLine) ?? 0 }, end: { type: line.kind === 'remove' ? 'old' : 'new', line: (line.kind === 'remove' ? line.oldLine : line.newLine) ?? 0 } })
+                : null;
+              const rangeSelected = rangeStart?.filePath === file.path && rangeStart.line.id === line.id;
+              return <div key={line.id}>
+                <div className={`group grid min-w-0 grid-cols-[2rem_3.5rem_3.5rem_1.25rem_minmax(0,1fr)] px-3 ${lineClass} ${rangeSelected || rangeIndices ? 'bg-indigo-500/25' : ''}`}>
+                  <button type="button" onClick={(event) => onLineAction(line, event.shiftKey)} disabled={!commentsEnabled || line.kind === 'meta'} className="flex items-center justify-center rounded text-slate-500 opacity-0 transition-opacity hover:bg-white/10 hover:text-white group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={rangeMode ? `Select ${rangeStart ? 'end' : 'start'} line for comment` : 'Comment on this line'}><MessageSquarePlus className="h-3.5 w-3.5" /></button>
+                  <span className="select-none pr-3 text-right text-slate-500">{line.oldLine ?? ''}</span><span className="select-none pr-3 text-right text-slate-500">{line.newLine ?? ''}</span><span className="select-none text-slate-500">{marker}</span><code className="diff-line-text min-w-0">{line.text || ' '}</code>
+                </div>
+                {threadRows.map((thread) => <ThreadCard key={thread.id} thread={thread} replyThreadId={replyThreadId} replyText={replyText} replyError={replyError} replySaving={replySaving} onStartReply={onStartReply} onReplyTextChange={onReplyTextChange} onSubmitReply={onSubmitReply} onCancelReply={onCancelReply} />)}
+                {draftEnd && <CommentComposer label={draft.start.id === draft.end.id ? 'Comment on line' : 'Comment on selected lines'} value={commentText} onChange={onCommentTextChange} onSubmit={onSubmitComment} onCancel={onCancelComment} saving={commentSaving} error={commentError} autoFocus />}
+              </div>;
             })}
-            {parsed.clipped && <span className="grid min-w-max grid-cols-[3.5rem_1.25rem_minmax(0,1fr)] px-3 text-slate-400"><span /><span>…</span><span>Diff clipped for this focused first pass</span></span>}
-          </pre>
+            {parsed.clipped && <div className="grid min-w-0 grid-cols-[2rem_3.5rem_3.5rem_1.25rem_minmax(0,1fr)] px-3 text-slate-400"><span /><span /><span /><span>…</span><span className="min-w-0">Diff clipped for this focused first pass</span></div>}
+          </div>
           {file.explanation && <figcaption className="border-t border-slate-100 px-4 py-3 text-xs leading-5 text-slate-600 dark:border-white/10 dark:text-slate-300"><strong className="mr-1 font-semibold text-slate-800 dark:text-white">Why this file is here:</strong>{file.explanation}</figcaption>}
         </>
       )}
@@ -295,6 +393,16 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   const [asking, setAsking] = useState(false);
   const [approvalState, setApprovalState] = useState<ApprovalState>('idle');
   const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [rangeMode, setRangeMode] = useState(false);
+  const [rangeStart, setRangeStart] = useState<RangeStart | null>(null);
+  const [replyThreadId, setReplyThreadId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [replySaving, setReplySaving] = useState(false);
   const questionRef = useRef<HTMLInputElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const cacheKey = useMemo(
@@ -313,17 +421,36 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setAskError(null);
     setApprovalState('idle');
     setApprovalError(null);
+    setCommentDraft(null);
+    setCommentText('');
+    setCommentError(null);
+    setRangeMode(false);
+    setRangeStart(null);
+    setReplyThreadId(null);
+    setReplyText('');
+    setReplyError(null);
 
     try {
-      const [raw, projectPath] = await Promise.all([
+      const [rawResult, projectPathResult, discussionsResult] = await Promise.allSettled([
         service.getMergeRequestReviewDetails(mergeRequest.project_id, mergeRequest.iid, controller.signal),
-        projectPathFor(service, mergeRequest)
+        projectPathFor(service, mergeRequest),
+        service.getMergeRequestDiscussions(mergeRequest.project_id, mergeRequest.iid, controller.signal)
       ]);
       if (controller.signal.aborted) return;
+      if (rawResult.status === 'rejected') throw rawResult.reason;
+      if (projectPathResult.status === 'rejected') throw projectPathResult.reason;
+      const raw = rawResult.value;
+      const projectPath = projectPathResult.value;
       const { changes, truncated } = compactChanges(raw.changes);
       if (!changes.length) throw new Error('GitLab returned no reviewable changes for this merge request.');
 
       const previous = readSemanticReviewCache(cacheKey);
+      const discussions = discussionsResult.status === 'fulfilled'
+        ? discussionsResult.value
+        : previous?.workspace.discussions ?? [];
+      const discussionsFailure = discussionsResult.status === 'rejected' && !previous?.workspace.discussions
+        ? (discussionsResult.reason instanceof Error ? discussionsResult.reason.message : 'GitLab did not return existing discussions.')
+        : null;
       const currentHeadSha = headSha(raw, mergeRequest);
       const delta = await buildDelta(service, mergeRequest, previous?.workspace.mergeRequest.headSha, currentHeadSha, controller.signal);
       if (controller.signal.aborted) return;
@@ -339,6 +466,8 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
         sourceBranch: raw.source_branch ?? mergeRequest.source_branch,
         targetBranch: raw.target_branch ?? mergeRequest.target_branch,
         webUrl: raw.web_url ?? mergeRequest.web_url,
+        baseSha: raw.diff_refs?.base_sha,
+        startSha: raw.diff_refs?.start_sha,
         headSha: currentHeadSha,
         changedFiles: Array.isArray(raw.changes) ? raw.changes.length : changes.length
       };
@@ -352,6 +481,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           ...previous.workspace,
           mergeRequest: metadata,
           delta,
+          discussions,
           truncated
         };
       } else {
@@ -378,15 +508,18 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           review,
           delta,
           ai: { configured: Boolean(aiConfig), used: aiUsed },
+          discussions,
           truncated
         };
       }
 
       const state = cleanSavedState(workspace.review.sections, previous?.state, delta);
       setSession({ workspace, state });
-      setNotice(aiFailure
-        ? `Using local semantic grouping because the AI request did not complete: ${aiFailure}`
-        : null);
+      const notices = [
+        aiFailure ? `Using local semantic grouping because the AI request did not complete: ${aiFailure}` : null,
+        discussionsFailure ? `Existing GitLab discussions could not be loaded: ${discussionsFailure}` : null
+      ].filter(Boolean);
+      setNotice(notices.length ? notices.join(' ') : null);
     } catch (loadError) {
       if (!controller.signal.aborted) {
         const previous = readSemanticReviewCache(cacheKey);
@@ -423,6 +556,15 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   const reviewedCount = sections.filter((section) => session?.state.statuses[section.id] === 'reviewed').length;
   const progressPercent = sections.length ? Math.round((reviewedCount / sections.length) * 100) : 0;
   const isApprovalStep = selectedId === APPROVAL_STEP_ID;
+  const commentFiles = useMemo(
+    () => sections.flatMap((section) => section.files.map((file) => ({ file, lines: parseDiff(file.diff, Number.POSITIVE_INFINITY).allLines }))),
+    [sections]
+  );
+  const normalizedThreads = useMemo(
+    () => normalizeDiscussions(workspace?.discussions, workspace?.mergeRequest.headSha ?? '', commentFiles),
+    [commentFiles, workspace?.discussions, workspace?.mergeRequest.headSha]
+  );
+  const commentsEnabled = Boolean(workspace && validSha(workspace.mergeRequest.baseSha) && validSha(workspace.mergeRequest.startSha) && validSha(workspace.mergeRequest.headSha));
 
   const scrollToReviewTop = useCallback(() => {
     window.scrollTo(0, 0);
@@ -432,6 +574,132 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setSession((current) => current ? { ...current, state: updater(current.state) } : current);
   }, []);
 
+  const updateWorkspace = useCallback((updater: (workspace: SemanticReviewWorkspaceData) => SemanticReviewWorkspaceData) => {
+    setSession((current) => current ? { ...current, workspace: updater(current.workspace) } : current);
+  }, []);
+
+  const cancelCommentDraft = useCallback(() => {
+    setCommentDraft(null);
+    setCommentText('');
+    setCommentError(null);
+  }, []);
+
+  const handleLineAction = useCallback((file: ReviewFileChange, line: ParsedDiffLine, shiftKey: boolean) => {
+    if (!commentsEnabled || line.kind === 'meta') return;
+    const shouldSelectRange = rangeMode || shiftKey;
+    if (!shouldSelectRange) {
+      setCommentDraft({ file, start: line, end: line });
+      setCommentText('');
+      setCommentError(null);
+      return;
+    }
+
+    if (!rangeStart || rangeStart.filePath !== file.path) {
+      setRangeStart({ filePath: file.path, line });
+      setCommentDraft(null);
+      setCommentError(null);
+      return;
+    }
+
+    const parsed = parseDiff(file.diff, Number.POSITIVE_INFINITY);
+    const startIndex = parsed.allLines.findIndex((candidate) => candidate.id === rangeStart.line.id);
+    const endIndex = parsed.allLines.findIndex((candidate) => candidate.id === line.id);
+    if (startIndex < 0 || endIndex < 0) {
+      setRangeStart({ filePath: file.path, line });
+      return;
+    }
+    const [first, last] = startIndex <= endIndex
+      ? [parsed.allLines[startIndex], parsed.allLines[endIndex]]
+      : [parsed.allLines[endIndex], parsed.allLines[startIndex]];
+    setCommentDraft({ file, start: first, end: last });
+    setCommentText('');
+    setCommentError(null);
+    setRangeStart(null);
+    setRangeMode(false);
+  }, [commentsEnabled, rangeMode, rangeStart]);
+
+  const toggleRangeMode = useCallback(() => {
+    if (!commentsEnabled) return;
+    setCommentDraft(null);
+    setCommentText('');
+    setCommentError(null);
+    setRangeStart(null);
+    setRangeMode((value) => !value);
+  }, [commentsEnabled]);
+
+  const submitComment = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!workspace || !commentDraft || !commentText.trim()) return;
+    const { baseSha, startSha, headSha } = workspace.mergeRequest;
+    if (!validSha(baseSha) || !validSha(startSha) || !validSha(headSha)) {
+      setCommentError('GitLab did not return complete diff references, so this line cannot be anchored safely. Refresh the review and try again.');
+      return;
+    }
+
+    setCommentSaving(true);
+    setCommentError(null);
+    try {
+      const position = await createDiscussionPosition(
+        { baseSha, startSha, headSha },
+        commentDraft.file,
+        commentDraft
+      );
+      const created = await service.createMergeRequestDiscussion(
+        workspace.mergeRequest.projectId,
+        workspace.mergeRequest.iid,
+        commentText.trim(),
+        position
+      );
+      updateWorkspace((current) => ({ ...current, discussions: [...(current.discussions ?? []), created] }));
+      cancelCommentDraft();
+      setNotice('Comment posted to GitLab.');
+    } catch (commentRequestError) {
+      const reason = commentRequestError instanceof Error ? ` (${commentRequestError.message})` : '';
+      setCommentError(`GitLab could not post this comment. The diff may have changed since it loaded; refresh the review and try again.${reason}`);
+    } finally {
+      setCommentSaving(false);
+    }
+  }, [cancelCommentDraft, commentDraft, commentText, service, updateWorkspace, workspace]);
+
+  const startReply = useCallback((threadId: string) => {
+    setReplyThreadId(threadId);
+    setReplyText('');
+    setReplyError(null);
+  }, []);
+
+  const cancelReply = useCallback(() => {
+    setReplyThreadId(null);
+    setReplyText('');
+    setReplyError(null);
+  }, []);
+
+  const submitReply = useCallback(async (event: FormEvent<HTMLFormElement>, threadId: string) => {
+    event.preventDefault();
+    if (!workspace || !replyText.trim()) return;
+    setReplySaving(true);
+    setReplyError(null);
+    try {
+      const note = await service.addMergeRequestDiscussionNote(
+        workspace.mergeRequest.projectId,
+        workspace.mergeRequest.iid,
+        threadId,
+        replyText.trim()
+      );
+      updateWorkspace((current) => ({
+        ...current,
+        discussions: (current.discussions ?? []).map((discussion) => discussion.id === threadId
+          ? { ...discussion, notes: [...discussion.notes, note] }
+          : discussion)
+      }));
+      cancelReply();
+      setNotice('Reply posted to GitLab.');
+    } catch (replyRequestError) {
+      setReplyError(replyRequestError instanceof Error ? replyRequestError.message : 'GitLab could not post this reply.');
+    } finally {
+      setReplySaving(false);
+    }
+  }, [cancelReply, replyText, service, updateWorkspace, workspace]);
+
   const selectSection = useCallback((id: string) => {
     updateState((state) => ({
       ...state,
@@ -440,17 +708,25 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
         ? state.statuses
         : { ...state.statuses, [id]: 'in-progress' }
     }));
+    cancelCommentDraft();
+    setRangeStart(null);
+    setRangeMode(false);
+    cancelReply();
     setAnswer(null);
     setAskError(null);
     scrollToReviewTop();
-  }, [scrollToReviewTop, updateState]);
+  }, [cancelCommentDraft, cancelReply, scrollToReviewTop, updateState]);
 
   const selectApprovalStep = useCallback(() => {
     updateState((state) => ({ ...state, selectedSectionId: APPROVAL_STEP_ID }));
+    cancelCommentDraft();
+    setRangeStart(null);
+    setRangeMode(false);
+    cancelReply();
     setAnswer(null);
     setAskError(null);
     scrollToReviewTop();
-  }, [scrollToReviewTop, updateState]);
+  }, [cancelCommentDraft, cancelReply, scrollToReviewTop, updateState]);
 
   const setStatus = useCallback((id: string, status: ReviewStatus) => {
     updateState((state) => ({ ...state, statuses: { ...state.statuses, [id]: status } }));
@@ -569,6 +845,8 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     .filter((section) => selected.relatedSectionIds.includes(section.id))
     .flatMap((section) => section.filePaths)
     .filter((path, index, paths) => paths.indexOf(path) === index && !selected.filePaths.includes(path));
+  const otherThreads = normalizedThreads.filter((thread) => !thread.inline);
+  const selectedThreadCount = selected.files.reduce((count, file) => count + normalizedThreads.filter((thread) => thread.inline && (thread.filePath === file.path || thread.filePath === file.oldPath)).length, 0);
 
   return (
     <div className="min-h-screen bg-[#f7f7f5] text-slate-950 dark:bg-[#10131b] dark:text-white">
@@ -627,14 +905,15 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           </details>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
-            <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Concept {selectedIndex + 1} of {sections.length}</span><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${riskMeta[selected.risk].classes}`}>{riskMeta[selected.risk].label}</span><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusMeta[selectedStatus].pill}`}>{statusMeta[selectedStatus].label}</span></div>
+            <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Concept {selectedIndex + 1} of {sections.length}</span><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${riskMeta[selected.risk].classes}`}>{riskMeta[selected.risk].label}</span><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusMeta[selectedStatus].pill}`}>{statusMeta[selectedStatus].label}</span>{selectedThreadCount > 0 && <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-200"><MessageSquare className="h-3 w-3" />{selectedThreadCount} {selectedThreadCount === 1 ? 'thread' : 'threads'}</span>}</div>
             <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">{selected.title}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{selected.intent}</p>
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04]"><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">What to check</p><p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-200">{selected.reviewFocus}</p></div>
           </section>
 
           <section className="space-y-3" aria-label="Changed code">
-            {selected.files.map((file) => <DiffFile key={file.path} file={file} />)}
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-900 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-100"><div className="flex items-start gap-2"><MessageSquare className="mt-0.5 h-4 w-4 shrink-0" /><div><p className="font-semibold">Comment directly on the diff</p><p className="mt-0.5">Hover a line and use the comment button. Use <strong>Select range</strong>, then choose two lines for a multiline thread. Hold Shift while choosing a second line as a shortcut.</p>{!commentsEnabled && <p className="mt-2 font-semibold text-amber-800 dark:text-amber-200">New comments are paused because this saved diff has no complete commit references. Refresh the review to re-anchor it safely.</p>}</div></div></div>
+            {selected.files.map((file) => <DiffFile key={file.path} file={file} threads={normalizedThreads.filter((thread) => thread.inline && (thread.filePath === file.path || thread.filePath === file.oldPath))} rangeMode={rangeMode} rangeStart={rangeStart} draft={commentDraft} commentText={commentText} commentError={commentError} commentSaving={commentSaving} replyThreadId={replyThreadId} replyText={replyText} replyError={replyError} replySaving={replySaving} commentsEnabled={commentsEnabled} onLineAction={(line, shiftKey) => handleLineAction(file, line, shiftKey)} onToggleRange={toggleRangeMode} onCommentTextChange={setCommentText} onSubmitComment={submitComment} onCancelComment={cancelCommentDraft} onStartReply={startReply} onReplyTextChange={setReplyText} onSubmitReply={submitReply} onCancelReply={cancelReply} />)}
           </section>
           </>}
         </main>
@@ -646,6 +925,8 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Private note</h2><textarea value={session.state.notes[selected.id] ?? ''} onChange={(event) => setNote(event.target.value)} placeholder="Anything you still need to verify…" rows={5} className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Saved only in this browser. Never sent to GitLab.</p></section>
+
+          {otherThreads.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><div className="flex items-center justify-between gap-2"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Other discussions</h2><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-white/10 dark:text-slate-300">{otherThreads.length}</span></div><p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">General comments and threads whose old anchor is no longer in this diff.</p>{otherThreads.map((thread) => <ThreadCard key={thread.id} thread={thread} replyThreadId={replyThreadId} replyText={replyText} replyError={replyError} replySaving={replySaving} onStartReply={startReply} onReplyTextChange={setReplyText} onSubmitReply={submitReply} onCancelReply={cancelReply} />)}</section>}
 
           {relatedFiles.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Related code</h2><ul className="mt-3 space-y-1.5">{relatedFiles.map((path) => <li key={path} className="break-all rounded-lg bg-slate-50 px-2 py-1.5 font-mono text-xs text-slate-600 dark:bg-white/[0.04] dark:text-slate-300">{path}</li>)}</ul></section>}
         </aside>}

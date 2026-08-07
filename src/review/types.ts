@@ -1,3 +1,5 @@
+import type { GitLabMergeRequestDiscussion } from '@/types/gitlab';
+
 export type ReviewStatus =
   | 'not-started'
   | 'in-progress'
@@ -55,6 +57,8 @@ export type SemanticReviewWorkspaceData = {
     sourceBranch: string;
     targetBranch: string;
     webUrl?: string;
+    baseSha?: string;
+    startSha?: string;
     headSha: string;
     changedFiles: number;
   };
@@ -64,6 +68,7 @@ export type SemanticReviewWorkspaceData = {
     configured: boolean;
     used: boolean;
   };
+  discussions?: GitLabMergeRequestDiscussion[];
   truncated: boolean;
 };
 

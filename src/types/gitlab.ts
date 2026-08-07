@@ -103,9 +103,56 @@ export interface GitLabMergeRequestReviewDetails {
   web_url?: string;
   sha?: string;
   diff_refs?: {
+    base_sha?: string;
+    start_sha?: string;
     head_sha?: string;
   };
   changes?: GitLabMergeRequestChange[];
+}
+
+export type GitLabDiscussionLineType = 'old' | 'new';
+
+export interface GitLabDiscussionLine {
+  line_code?: string;
+  type?: GitLabDiscussionLineType;
+  old_line?: number | null;
+  new_line?: number | null;
+}
+
+export interface GitLabDiscussionLineRange {
+  start?: GitLabDiscussionLine;
+  end?: GitLabDiscussionLine;
+}
+
+export interface GitLabDiscussionPosition {
+  base_sha?: string;
+  start_sha?: string;
+  head_sha?: string;
+  old_path?: string;
+  new_path?: string;
+  position_type?: 'text' | 'image' | 'file' | string;
+  old_line?: number | null;
+  new_line?: number | null;
+  line_range?: GitLabDiscussionLineRange;
+}
+
+export interface GitLabDiscussionNote {
+  id: number;
+  type: 'DiscussionNote' | 'DiffNote' | string | null;
+  body: string;
+  author: GitLabUser | null;
+  created_at: string;
+  updated_at?: string;
+  system?: boolean;
+  resolved?: boolean;
+  resolvable?: boolean;
+  position?: GitLabDiscussionPosition | null;
+}
+
+export interface GitLabMergeRequestDiscussion {
+  id: string;
+  individual_note: boolean;
+  notes: GitLabDiscussionNote[];
 }
 
 export interface GitLabCommitComparison {

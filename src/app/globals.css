@@ -5,6 +5,8 @@
   --foreground: #0f172a;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --scrollbar-thumb: rgb(148 163 184 / 0.58);
+  --scrollbar-thumb-hover: rgb(100 116 139 / 0.78);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -13,6 +15,8 @@
     --foreground: #f1f5f9;
     --color-background: var(--background);
     --color-foreground: var(--foreground);
+    --scrollbar-thumb: rgb(100 116 139 / 0.72);
+    --scrollbar-thumb-hover: rgb(129 140 248 / 0.82);
   }
 }
 
@@ -20,6 +24,40 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Keep scrollable surfaces quiet and consistent across the app. */
+* {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+.diff-line-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .merge-train-track-scene {
   position: relative;
