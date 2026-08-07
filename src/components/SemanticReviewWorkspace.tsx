@@ -49,6 +49,9 @@ type ReviewSession = {
 const MAX_FILES = 90;
 const MAX_DIFF_PER_FILE = 8_000;
 const MAX_DIFF_TOTAL = 260_000;
+const APPROVAL_STEP_ID = '__guided-review-approval__';
+
+type ApprovalState = 'idle' | 'approving' | 'approved' | 'error';
 
 const statusMeta: Record<ReviewStatus, { label: string; dot: string; pill: string }> = {
   'not-started': { label: 'Not read yet', dot: 'bg-slate-300 dark:bg-slate-600', pill: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300' },
@@ -190,7 +193,9 @@ const cleanSavedState = (sections: SemanticSection[], saved: SavedReviewState | 
     }
   }
 
-  const selectedSectionId = saved?.selectedSectionId && sectionIds.has(saved.selectedSectionId)
+  const selectedSectionId = saved?.selectedSectionId === APPROVAL_STEP_ID
+    ? APPROVAL_STEP_ID
+    : saved?.selectedSectionId && sectionIds.has(saved.selectedSectionId)
     ? saved.selectedSectionId
     : sections[0]?.id;
   return { statuses, notes, selectedSectionId };
@@ -287,6 +292,8 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   const [answer, setAnswer] = useState<string | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const [approvalState, setApprovalState] = useState<ApprovalState>('idle');
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const questionRef = useRef<HTMLInputElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const cacheKey = useMemo(
@@ -303,6 +310,8 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setNotice(null);
     setAnswer(null);
     setAskError(null);
+    setApprovalState('idle');
+    setApprovalError(null);
 
     try {
       const [raw, projectPath] = await Promise.all([
@@ -412,6 +421,11 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   const selectedIndex = selected ? sections.findIndex((section) => section.id === selected.id) : -1;
   const reviewedCount = sections.filter((section) => session?.state.statuses[section.id] === 'reviewed').length;
   const progressPercent = sections.length ? Math.round((reviewedCount / sections.length) * 100) : 0;
+  const isApprovalStep = selectedId === APPROVAL_STEP_ID;
+
+  const scrollToReviewTop = useCallback(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   const updateState = useCallback((updater: (state: SavedReviewState) => SavedReviewState) => {
     setSession((current) => current ? { ...current, state: updater(current.state) } : current);
@@ -427,7 +441,15 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     }));
     setAnswer(null);
     setAskError(null);
-  }, [updateState]);
+    scrollToReviewTop();
+  }, [scrollToReviewTop, updateState]);
+
+  const selectApprovalStep = useCallback(() => {
+    updateState((state) => ({ ...state, selectedSectionId: APPROVAL_STEP_ID }));
+    setAnswer(null);
+    setAskError(null);
+    scrollToReviewTop();
+  }, [scrollToReviewTop, updateState]);
 
   const setStatus = useCallback((id: string, status: ReviewStatus) => {
     updateState((state) => ({ ...state, statuses: { ...state.statuses, [id]: status } }));
@@ -439,20 +461,42 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   }, [selected, updateState]);
 
   const moveNext = useCallback(() => {
-    if (!selected) return;
+    if (!selected || isApprovalStep) return;
     const next = sections[selectedIndex + 1];
-    updateState((state) => ({
-      ...state,
-      statuses: { ...state.statuses, [selected.id]: 'reviewed' },
-      selectedSectionId: next?.id ?? selected.id
-    }));
+    updateState((state) => {
+      const statuses = { ...state.statuses, [selected.id]: 'reviewed' as const };
+      const reviewComplete = sections.every((section) => statuses[section.id] === 'reviewed');
+      return {
+        ...state,
+        statuses,
+        selectedSectionId: next?.id ?? (reviewComplete ? APPROVAL_STEP_ID : selected.id)
+      };
+    });
     setAnswer(null);
     setAskError(null);
-  }, [sections, selected, selectedIndex, updateState]);
+    scrollToReviewTop();
+  }, [isApprovalStep, sections, scrollToReviewTop, selected, selectedIndex, updateState]);
+
+  const approveReview = useCallback(async () => {
+    if (!workspace || approvalState === 'approving' || approvalState === 'approved') return;
+    setApprovalState('approving');
+    setApprovalError(null);
+    try {
+      await service.approveMergeRequest(
+        workspace.mergeRequest.projectId,
+        workspace.mergeRequest.iid,
+        workspace.mergeRequest.headSha
+      );
+      setApprovalState('approved');
+    } catch (approvalRequestError) {
+      setApprovalState('error');
+      setApprovalError(approvalRequestError instanceof Error ? approvalRequestError.message : 'GitLab could not record your approval.');
+    }
+  }, [approvalState, service, workspace]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey || !selected) return;
+      if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey || !selected || isApprovalStep) return;
       const key = event.key.toLowerCase();
       if (key === '?') {
         event.preventDefault();
@@ -488,7 +532,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [aiConfig, moveNext, sections, selectSection, selected, selectedIndex, setStatus]);
+  }, [aiConfig, isApprovalStep, moveNext, sections, selectSection, selected, selectedIndex, setStatus]);
 
   const askQuestion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -549,19 +593,32 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
         <aside className="min-w-0 lg:sticky lg:top-[4.75rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
           <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
             <div className="flex items-center justify-between gap-2 px-2 pb-3"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Review map</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{sections.length} concepts · {workspace.mergeRequest.changedFiles} files</p></div><button type="button" onClick={() => setShowShortcuts(true)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white" aria-label="Show keyboard shortcuts"><HelpCircle className="h-4 w-4" /></button></div>
-            <nav className="space-y-1" aria-label="Semantic review concepts">
+            <nav className="space-y-1" aria-label="Guided review map">
               {sections.map((section, index) => {
                 const status = session.state.statuses[section.id] ?? 'not-started';
-                const active = section.id === selected.id;
+                const active = !isApprovalStep && section.id === selected.id;
                 return <button key={section.id} type="button" onClick={() => selectSection(section.id)} className={`w-full rounded-xl px-2.5 py-2.5 text-left transition-colors ${active ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-slate-100 dark:hover:bg-white/[0.06]'}`} aria-current={active ? 'step' : undefined}>
                   <span className="flex items-start gap-2"><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${active ? 'bg-white' : statusMeta[status].dot}`} /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className={`text-[10px] font-bold ${active ? 'text-indigo-100' : 'text-slate-400'}`}>{index + 1}</span><span className="truncate text-sm font-semibold">{section.title}</span></span><span className={`mt-1 flex items-center gap-1 text-[11px] ${active ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'}`}><FileCode2 className="h-3 w-3" />{section.files.length} {section.files.length === 1 ? 'file' : 'files'}<span className={`ml-auto rounded-full border px-1.5 py-0.5 font-semibold ${active ? 'border-white/25 bg-white/10 text-white' : riskMeta[section.risk].classes}`}>{section.risk}</span></span></span></span>
                 </button>;
               })}
+              <button type="button" onClick={selectApprovalStep} className={`w-full rounded-xl px-2.5 py-2.5 text-left transition-colors ${isApprovalStep ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-slate-100 dark:hover:bg-white/[0.06]'}`} aria-current={isApprovalStep ? 'step' : undefined}>
+                <span className="flex items-start gap-2"><span className={`mt-1.5 flex h-2 w-2 shrink-0 rounded-full ${isApprovalStep ? 'bg-white' : 'bg-emerald-500'}`} /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><Check className={`h-3 w-3 ${isApprovalStep ? 'text-indigo-100' : 'text-emerald-600 dark:text-emerald-300'}`} /><span className="truncate text-sm font-semibold">Final decision</span></span><span className={`mt-1 block text-[11px] ${isApprovalStep ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'}`}>Ready to approve</span></span></span>
+              </button>
             </nav>
           </div>
         </aside>
 
-        <main className="min-w-0 space-y-5">
+        <main className={`min-w-0 space-y-5 ${isApprovalStep ? 'lg:col-span-2' : ''}`}>
+          {isApprovalStep ? <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-300">Final decision</p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Ready to approve?</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">You have reviewed {reviewedCount} of {sections.length} {sections.length === 1 ? 'concept' : 'concepts'} in this merge request. If everything looks good, record your approval in GitLab.</p>
+            <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/[0.04]"><div className="flex items-start gap-3"><Check className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600 dark:text-indigo-300" /><div><p className="text-sm font-semibold text-slate-900 dark:text-white">Final review decision</p><p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">Your private notes remain saved in this browser.</p></div></div></div>
+            {approvalState === 'approved' ? <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-100" role="status">Approved in GitLab.</div> : <>
+              {approvalError && <p className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-100" role="alert">{approvalError}</p>}
+              <div className="mt-6 flex flex-wrap gap-3"><button type="button" onClick={() => void approveReview()} disabled={approvalState === 'approving'} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60">{approvalState === 'approving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{approvalState === 'error' ? 'Try approval again' : 'Approve merge request'}</button><button type="button" onClick={() => selectSection(sections[sections.length - 1].id)} className="rounded-lg px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/[0.06]">Back to last concept</button></div>
+            </>}
+          </section> : <>
           <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]" open>
             <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Merge request</p><h1 className="mt-1 text-lg font-semibold tracking-tight text-slate-950 dark:text-white">{workspace.mergeRequest.title}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{workspace.mergeRequest.author} · <code>{workspace.mergeRequest.sourceBranch}</code> → <code>{workspace.mergeRequest.targetBranch}</code></p></div><ChevronDown className="mt-1 h-5 w-5 text-slate-400 transition-transform group-open:rotate-180" /></summary>
             <div className="border-t border-slate-100 px-5 py-4 text-sm leading-6 text-slate-600 dark:border-white/10 dark:text-slate-300"><p>{workspace.review.overview.purpose}</p><dl className="mt-4 grid gap-3 sm:grid-cols-2"><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Scope</dt><dd className="mt-1">{workspace.review.overview.scope}</dd></div><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Attention</dt><dd className="mt-1">{workspace.review.overview.riskSummary}</dd></div></dl>{workspace.truncated && <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">Large diffs were clipped in this saved review so it remains focused and browser-safe.</p>}{workspace.delta.state === 'updated' && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs leading-5 text-violet-900 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-100"><strong>New commits since your last review</strong><ul className="mt-1 list-disc space-y-0.5 pl-4">{workspace.delta.summary.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>
@@ -577,9 +634,10 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           <section className="space-y-3" aria-label="Changed code">
             {selected.files.map((file) => <DiffFile key={file.path} file={file} />)}
           </section>
+          </>}
         </main>
 
-        <aside className="space-y-4 lg:sticky lg:top-[4.75rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
+        {!isApprovalStep && <aside className="space-y-4 lg:sticky lg:top-[4.75rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
             <div className="flex items-center justify-between gap-3"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Ask about this code</h2>{aiConfig && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300"><Sparkles className="h-3 w-3" />AI</span>}</div>
             {aiConfig ? <><form onSubmit={askQuestion} className="mt-3 flex gap-2"><input ref={questionRef} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What calls this? Is failure covered?" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><button type="submit" disabled={asking || !question.trim()} className="inline-flex w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" aria-label="Ask AI">{asking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button></form><div className="mt-3 space-y-1">{selected.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setQuestion(prompt); questionRef.current?.focus(); }} className="block w-full rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white">{prompt}</button>)}</div>{(answer || askError) && <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.04]"><div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{askError ? 'Could not answer' : 'Evidence-led answer'}</span><button type="button" onClick={() => { setAnswer(null); setAskError(null); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Dismiss answer"><X className="h-4 w-4" /></button></div>{askError ? <p className="text-rose-700 dark:text-rose-200">{askError}</p> : <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{answer}</p>}<p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Based only on the changed files shown in this concept.</p></div>}</> : <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 dark:border-white/15 dark:bg-white/[0.04]"><div className="flex gap-2"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><div><p className="text-sm font-medium text-slate-700 dark:text-slate-200">AI is optional</p><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Local semantic grouping is active. Add your own provider to ask questions about this changed code.</p><button type="button" onClick={onOpenAiSettings} className="mt-2 text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300">Add AI settings</button></div></div></div>}
@@ -588,10 +646,10 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Private note</h2><textarea value={session.state.notes[selected.id] ?? ''} onChange={(event) => setNote(event.target.value)} placeholder="Anything you still need to verify…" rows={5} className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Saved only in this browser. Never sent to GitLab.</p></section>
 
           {relatedFiles.length > 0 && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Related code</h2><ul className="mt-3 space-y-1.5">{relatedFiles.map((path) => <li key={path} className="break-all rounded-lg bg-slate-50 px-2 py-1.5 font-mono text-xs text-slate-600 dark:bg-white/[0.04] dark:text-slate-300">{path}</li>)}</ul></section>}
-        </aside>
+        </aside>}
       </div>
 
-      <footer className="sticky bottom-0 z-20 border-t border-slate-200 bg-[#f7f7f5]/95 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-[#10131b]/95 sm:px-6"><div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${statusMeta[selectedStatus].dot}`} />{selected.files.length} {selected.files.length === 1 ? 'file' : 'files'} in view</span><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStatus(selected.id, 'needs-look')} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 dark:border-amber-500/25 dark:bg-white/[0.04] dark:text-amber-100 dark:hover:bg-amber-500/10"><Flag className="h-3.5 w-3.5" />Flag <kbd className="hidden rounded bg-amber-100 px-1 font-mono text-[10px] sm:inline dark:bg-amber-500/15">F</kbd></button><button type="button" onClick={() => setStatus(selected.id, 'blocked')} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 dark:border-rose-500/25 dark:bg-white/[0.04] dark:text-rose-100 dark:hover:bg-rose-500/10"><AlertTriangle className="h-3.5 w-3.5" />Block <kbd className="hidden rounded bg-rose-100 px-1 font-mono text-[10px] sm:inline dark:bg-rose-500/15">B</kbd></button><button type="button" onClick={moveNext} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"><Check className="h-3.5 w-3.5" />{selectedIndex === sections.length - 1 ? 'Mark reviewed' : 'Reviewed, next'} <kbd className="hidden rounded bg-white/15 px-1 font-mono text-[10px] sm:inline">R</kbd></button></div></div></footer>
+      {!isApprovalStep && <footer className="sticky bottom-0 z-20 border-t border-slate-200 bg-[#f7f7f5]/95 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-[#10131b]/95 sm:px-6"><div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${statusMeta[selectedStatus].dot}`} />{selected.files.length} {selected.files.length === 1 ? 'file' : 'files'} in view</span><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStatus(selected.id, 'needs-look')} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 dark:border-amber-500/25 dark:bg-white/[0.04] dark:text-amber-100 dark:hover:bg-amber-500/10"><Flag className="h-3.5 w-3.5" />Flag <kbd className="hidden rounded bg-amber-100 px-1 font-mono text-[10px] sm:inline dark:bg-amber-500/15">F</kbd></button><button type="button" onClick={() => setStatus(selected.id, 'blocked')} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 dark:border-rose-500/25 dark:bg-white/[0.04] dark:text-rose-100 dark:hover:bg-rose-500/10"><AlertTriangle className="h-3.5 w-3.5" />Block <kbd className="hidden rounded bg-rose-100 px-1 font-mono text-[10px] sm:inline dark:bg-rose-500/15">B</kbd></button><button type="button" onClick={moveNext} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"><Check className="h-3.5 w-3.5" />{selectedIndex === sections.length - 1 ? 'Mark reviewed' : 'Reviewed, next'} <kbd className="hidden rounded bg-white/15 px-1 font-mono text-[10px] sm:inline">R</kbd></button></div></div></footer>}
 
       {showShortcuts && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"><div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-[#f7f7f5] p-5 shadow-2xl dark:border-white/10 dark:bg-[#10131b]"><div className="flex items-center justify-between"><h2 className="font-semibold">Keyboard shortcuts</h2><button type="button" onClick={() => setShowShortcuts(false)} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Close shortcuts"><X className="h-5 w-5" /></button></div><dl className="mt-4 grid grid-cols-[3rem_1fr] gap-y-3 text-sm text-slate-600 dark:text-slate-300"><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">J/K</kbd></dt><dd>Next / previous concept</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">R</kbd></dt><dd>Mark reviewed and move on</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">F/B</kbd></dt><dd>Flag / mark blocking</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">/</kbd></dt><dd>Ask AI about selected code</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">?</kbd></dt><dd>Toggle this guide</dd></dl></div></div>}
     </div>

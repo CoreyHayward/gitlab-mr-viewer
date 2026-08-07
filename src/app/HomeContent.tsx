@@ -343,7 +343,10 @@ export default function HomeContent() {
           service={service}
           mergeRequest={reviewingMergeRequest}
           aiConfig={aiConfig}
-          onClose={() => setReviewingMergeRequest(null)}
+          onClose={() => {
+            setReviewingMergeRequest(null);
+            void loadMergeRequests();
+          }}
           onOpenAiSettings={() => setIsConnectionSettingsOpen(true)}
         />
         {connectionSettingsModal}

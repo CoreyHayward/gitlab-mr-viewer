@@ -13,6 +13,11 @@ import {
 } from '@/types/gitlab';
 import { matchesApprovalFilter } from '@/utils/approvalState';
 
+type GitLabRequestOptions = {
+  method?: 'GET' | 'POST';
+  body?: Record<string, unknown>;
+};
+
 const getMergeRequestSortTimestamp = (mergeRequest: GitLabMergeRequest, filters: FilterOptions) => {
   if (filters.mergedAfter && mergeRequest.merged_at) {
     return new Date(mergeRequest.merged_at).getTime();
@@ -44,7 +49,12 @@ export class GitLabService {
     return this.baseUrl;
   }
 
-  private async makeRequest<T>(endpoint: string, timeout: number = 30000, externalSignal?: AbortSignal): Promise<T> {
+  private async makeRequest<T>(
+    endpoint: string,
+    timeout: number = 30000,
+    externalSignal?: AbortSignal,
+    options: GitLabRequestOptions = {}
+  ): Promise<T> {
     const url = `${this.baseUrl}/api/v4${endpoint}`;
     
     const controller = new AbortController();
@@ -62,12 +72,14 @@ export class GitLabService {
     
     try {
       const response = await fetch(url, {
+        method: options.method ?? 'GET',
         headers: {
           'Authorization': `Bearer ${this.token}`,
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache'
         },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: controller.signal,
       });
 
@@ -439,6 +451,26 @@ export class GitLabService {
       30000,
       signal
     );
+  }
+
+  async approveMergeRequest(
+    projectId: number,
+    mergeRequestIid: number,
+    headSha?: string
+  ): Promise<GitLabMergeRequestApprovalStatus> {
+    const sha = headSha && /^[a-f0-9]{7,80}$/i.test(headSha) ? headSha : undefined;
+    await this.makeRequest<GitLabMergeRequest>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}/approve`,
+      10000,
+      undefined,
+      {
+        method: 'POST',
+        ...(sha ? { body: { sha } } : {})
+      }
+    );
+
+    this.approvalCache.delete(this.getApprovalCacheKey(projectId, mergeRequestIid));
+    return this.getMergeRequestApprovalStatus(projectId, mergeRequestIid, undefined, true);
   }
 
   async compareMergeRequestCommits(
