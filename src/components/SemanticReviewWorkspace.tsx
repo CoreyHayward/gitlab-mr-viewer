@@ -332,13 +332,13 @@ function DiffFile({ file, threads, rangeMode, rangeStart, draft, commentText, co
 
   return (
     <figure className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
-      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-white/10">
-        <button type="button" onClick={() => setOpen((value) => !value)} className="min-w-0 text-left" aria-expanded={open}>
+      <div onClick={() => setOpen((value) => !value)} className="flex cursor-pointer items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-white/10">
+        <button type="button" className="min-w-0 text-left" aria-expanded={open}>
           <span className={`mr-2 inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${kindClass}`}>{kindLabel}</span>
           <code className="break-all text-xs font-medium text-slate-800 dark:text-slate-100">{file.path}</code>
           {file.oldPath && <span className="mt-1 block break-all text-xs text-slate-400">renamed from {file.oldPath}</span>}
         </button>
-        <div className="flex shrink-0 items-center gap-2"><span className="text-xs font-medium"><span className="text-emerald-600 dark:text-emerald-300">+{parsed.additions}</span><span className="ml-2 text-rose-600 dark:text-rose-300">−{parsed.deletions}</span></span><button type="button" onClick={onToggleRange} disabled={!commentsEnabled} className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${rangeMode ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-400/35 dark:bg-indigo-500/10 dark:text-indigo-200' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/[0.06]'} disabled:cursor-not-allowed disabled:opacity-50`}>{rangeStart?.filePath === file.path ? 'Choose end line' : 'Select range'}</button>{open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}</div>
+        <div className="flex shrink-0 items-center gap-2"><span className="text-xs font-medium"><span className="text-emerald-600 dark:text-emerald-300">+{parsed.additions}</span><span className="ml-2 text-rose-600 dark:text-rose-300">−{parsed.deletions}</span></span><button type="button" onClick={(event) => { event.stopPropagation(); onToggleRange(); }} disabled={!commentsEnabled} className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${rangeMode ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-400/35 dark:bg-indigo-500/10 dark:text-indigo-200' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/[0.06]'} disabled:cursor-not-allowed disabled:opacity-50`}>{rangeStart?.filePath === file.path ? 'Choose end line' : 'Select range'}</button>{open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}</div>
       </div>
       {open && (
         <>
