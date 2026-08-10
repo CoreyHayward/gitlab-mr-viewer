@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Eye, GitBranch, History, Link, Settings2, TriangleAlert, User } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Eye, GitBranch, History, Link, Search, Settings2, TriangleAlert, User, X } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
@@ -12,6 +12,24 @@ import LegacyMergeTrainWatcher from './LegacyMergeTrainWatcher';
 import LegacyProjectSelector from './LegacyProjectSelector';
 
 export type LegacyQuickFilter = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
+
+const matchesMergeRequestSearch = (mergeRequest: GitLabMergeRequest, searchTerm: string) => {
+  const searchableFields = [
+    mergeRequest.title,
+    mergeRequest.description,
+    `#${mergeRequest.iid}`,
+    `!${mergeRequest.iid}`,
+    mergeRequest.author.name,
+    mergeRequest.author.username,
+    mergeRequest.project?.name,
+    mergeRequest.project?.path_with_namespace,
+    mergeRequest.source_branch,
+    mergeRequest.target_branch,
+    ...mergeRequest.labels
+  ];
+
+  return searchableFields.some((field) => field?.toLowerCase().includes(searchTerm));
+};
 
 interface LegacyWorkspaceProps {
   service: GitLabService;
@@ -55,6 +73,15 @@ export default function LegacyWorkspace({
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
   const [mergeTrainWatcherTrainMode, setMergeTrainWatcherTrainMode] = useState(false);
+  const [mergeRequestSearch, setMergeRequestSearch] = useState('');
+
+  const isMergeRequestSearchActive = mergeRequestSearch.trim().length > 0;
+  const visibleMergeRequests = useMemo(() => {
+    const searchTerm = mergeRequestSearch.trim().toLowerCase();
+    if (!searchTerm) return mergeRequests;
+
+    return mergeRequests.filter((mergeRequest) => matchesMergeRequestSearch(mergeRequest, searchTerm));
+  }, [mergeRequestSearch, mergeRequests]);
 
   useEffect(() => {
     const savedUIState = loadUIState();
@@ -133,13 +160,48 @@ export default function LegacyWorkspace({
               </div>
             )}
 
-            {!loading && !error && (
-              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-                Found {mergeRequests.length} merge request{mergeRequests.length === 1 ? '' : 's'} {selectedProjects.length === 1 ? <>in <strong>{selectedProjects[0].path_with_namespace}</strong></> : selectedProjects.length > 1 ? <>across <strong>{selectedProjects.length} selected projects</strong></> : 'across all projects'}
+            {!error && (
+              <div className="mb-4">
+                <div className="relative w-full sm:max-w-xl">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="search"
+                    value={mergeRequestSearch}
+                    onChange={(event) => setMergeRequestSearch(event.target.value)}
+                    placeholder="Search loaded merge requests..."
+                    aria-label="Search loaded merge requests"
+                    className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-10 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 hover:border-gray-300 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white dark:placeholder:text-gray-500 dark:hover:border-neutral-600 dark:focus:border-violet-400 dark:focus:ring-violet-900/30"
+                  />
+                  {mergeRequestSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setMergeRequestSearch('')}
+                      aria-label="Clear merge request search"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
-            <MergeRequestList mergeRequests={mergeRequests} loading={loading} showProjectInfo={selectedProjects.length !== 1} loadingMessage={selectedProjects.length === 0 ? 'Loading merge requests across all projects...' : selectedProjects.length > 1 ? `Loading merge requests from ${selectedProjects.length} selected projects...` : undefined} onStartSemanticReview={onStartSemanticReview} />
+            {!loading && !error && (
+              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                {isMergeRequestSearchActive ? 'Showing ' : 'Found '}
+                {isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length} merge request{(isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length) === 1 ? '' : 's'}{isMergeRequestSearchActive && ` matching "${mergeRequestSearch.trim()}"`} {selectedProjects.length === 1 ? <>in <strong>{selectedProjects[0].path_with_namespace}</strong></> : selectedProjects.length > 1 ? <>across <strong>{selectedProjects.length} selected projects</strong></> : 'across all projects'}
+              </div>
+            )}
+
+            <MergeRequestList
+              mergeRequests={visibleMergeRequests}
+              loading={loading}
+              showProjectInfo={selectedProjects.length !== 1}
+              loadingMessage={selectedProjects.length === 0 ? 'Loading merge requests across all projects...' : selectedProjects.length > 1 ? `Loading merge requests from ${selectedProjects.length} selected projects...` : undefined}
+              emptyMessage={isMergeRequestSearchActive ? 'No merge requests match your search' : undefined}
+              emptyDescription={isMergeRequestSearchActive ? 'Try a different search term or clear the search to see all loaded merge requests.' : undefined}
+              onStartSemanticReview={onStartSemanticReview}
+            />
           </main>
 
           {mergeTrainWatcherVisible && !mergeTrainWatcherTrainMode && (

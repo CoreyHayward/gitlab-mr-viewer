@@ -9,10 +9,12 @@ interface MergeRequestListProps {
   loading: boolean;
   showProjectInfo?: boolean; // New prop to control whether to show project info
   loadingMessage?: string; // Custom loading message
+  emptyMessage?: string;
+  emptyDescription?: string;
   onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }
 
-export default function MergeRequestList({ mergeRequests, loading, showProjectInfo = false, loadingMessage, onStartSemanticReview }: MergeRequestListProps) {
+export default function MergeRequestList({ mergeRequests, loading, showProjectInfo = false, loadingMessage, emptyMessage = 'No merge requests found', emptyDescription = 'Try adjusting your filters or select a different project to see merge requests', onStartSemanticReview }: MergeRequestListProps) {
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, {
       year: 'numeric',
@@ -266,10 +268,10 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
           <FileText className="w-12 h-12 text-gray-400 dark:text-gray-600" />
         </div>
         <div className="text-gray-900 dark:text-white text-xl font-semibold mb-2">
-          No merge requests found
+          {emptyMessage}
         </div>
         <div className="text-gray-500 dark:text-gray-400 text-base max-w-md mx-auto">
-          Try adjusting your filters or select a different project to see merge requests
+          {emptyDescription}
         </div>
       </div>
     );

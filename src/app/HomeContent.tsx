@@ -46,7 +46,7 @@ const applyQuickFilter = (
     case 'my-open-prs':
       return currentUser ? { ...filters, state: 'opened', authors: [currentUser.username] } : filters;
     case 'needs-approval':
-      return { ...filters, approvalState: 'needs-review' };
+      return { ...filters, approvalState: 'needs-approval' };
     case 'not-reviewed-by-me':
       return { ...filters, notReviewedByMe: true };
     case 'recently-merged-prs':

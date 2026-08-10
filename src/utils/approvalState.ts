@@ -54,5 +54,9 @@ export const matchesApprovalFilter = (
     approval_status: approvalStatus
   });
 
+  if (approvalState === 'needs-approval') {
+    return category === 'needs-review' || category === 'partially-approved';
+  }
+
   return category === approvalState;
 };

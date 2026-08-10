@@ -14,6 +14,13 @@ afterEach(() => {
 });
 
 describe('guided review URL state', () => {
+  it('round-trips the needs approval filter state', () => {
+    const encoded = encodeFiltersToURL({ approvalState: 'needs-approval' });
+
+    expect(encoded).toBe('approvalState=needs-approval');
+    expect(decodeFiltersFromURL(new URLSearchParams(encoded)).filters.approvalState).toBe('needs-approval');
+  });
+
   it('decodes a guided review target alongside existing filters', () => {
     const result = decodeFiltersFromURL(new URLSearchParams('project=42&title=auth&reviewProject=42&reviewIid=17'));
 

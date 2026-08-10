@@ -1,4 +1,4 @@
-export type ApprovalFilterState = 'needs-review' | 'partially-approved' | 'approved';
+export type ApprovalFilterState = 'needs-review' | 'needs-approval' | 'partially-approved' | 'approved';
 
 export interface GitLabProject {
   id: number;

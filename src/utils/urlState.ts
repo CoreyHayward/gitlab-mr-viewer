@@ -1,6 +1,6 @@
 import { FilterOptions } from '@/types/gitlab';
 
-const VALID_APPROVAL_STATES = new Set(['needs-review', 'partially-approved', 'approved']);
+const VALID_APPROVAL_STATES = new Set(['needs-review', 'needs-approval', 'partially-approved', 'approved']);
 const GUIDED_REVIEW_PROJECT_PARAM = 'reviewProject';
 const GUIDED_REVIEW_IID_PARAM = 'reviewIid';
 const GUIDED_REVIEW_HISTORY_KEY = 'gitlabMrViewerGuidedReview';
