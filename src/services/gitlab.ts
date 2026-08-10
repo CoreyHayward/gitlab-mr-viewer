@@ -456,6 +456,20 @@ export class GitLabService {
     );
   }
 
+  async getMergeRequest(
+    projectId: number,
+    mergeRequestIid: number,
+    signal?: AbortSignal
+  ): Promise<GitLabMergeRequest> {
+    const mergeRequest = await this.makeRequest<GitLabMergeRequest>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}`,
+      30000,
+      signal
+    );
+    const [enrichedMergeRequest] = await this.enrichMergeRequestsWithProjects([mergeRequest]);
+    return enrichedMergeRequest ?? mergeRequest;
+  }
+
   async getMergeRequestDiscussions(
     projectId: number,
     mergeRequestIid: number,

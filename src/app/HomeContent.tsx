@@ -15,7 +15,15 @@ import { clearAiProviderConfig, writeAiProviderConfig } from '@/review/storage';
 import type { AiProviderConfig } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
-import { decodeFiltersFromURL, updateURL } from '@/utils/urlState';
+import {
+  clearGuidedReviewURL,
+  decodeFiltersFromURL,
+  decodeGuidedReviewFromURL,
+  isGuidedReviewHistoryEntry,
+  pushGuidedReviewURL,
+  updateURL,
+  type GuidedReviewLocation
+} from '@/utils/urlState';
 
 type UIMode = 'classic' | 'desk';
 
@@ -69,21 +77,35 @@ export default function HomeContent() {
   const [aiConfig, setAiConfig] = useState<AiProviderConfig | null>(null);
   const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
   const [reviewingMergeRequest, setReviewingMergeRequest] = useState<GitLabMergeRequest | null>(null);
+  const [guidedReviewLocation, setGuidedReviewLocation] = useState<GuidedReviewLocation | null>(null);
 
   const requestControllerRef = useRef<AbortController | null>(null);
+  const reviewLookupControllerRef = useRef<AbortController | null>(null);
+  const reviewLookupKeyRef = useRef<string | null>(null);
   const effectiveFilters = useMemo(
     () => applyQuickFilter(filters, quickFilter, currentUser),
     [currentUser, filters, quickFilter]
   );
 
-  useEffect(() => {
-    const { filters: urlFilters, projectIds } = decodeFiltersFromURL(new URLSearchParams(window.location.search));
+  const applyURLState = useCallback(() => {
+    const { filters: urlFilters, projectIds, guidedReview } = decodeFiltersFromURL(new URLSearchParams(window.location.search));
     setFilters(urlFilters);
+    setQuickFilter(null);
     setInitialProjectIds(projectIds ?? []);
+    if (!projectIds || projectIds.length === 0) setSelectedProjects([]);
+    setGuidedReviewLocation(guidedReview);
+    setReviewingMergeRequest(null);
+  }, []);
+
+  useEffect(() => {
+    applyURLState();
     const savedMode = localStorage.getItem(UI_MODE_KEY);
     if (savedMode === 'desk') setUIMode('desk');
     setAutoRefreshEnabled(localStorage.getItem(AUTO_REFRESH_ENABLED_KEY) === 'true');
-  }, []);
+
+    window.addEventListener('popstate', applyURLState);
+    return () => window.removeEventListener('popstate', applyURLState);
+  }, [applyURLState]);
 
   useEffect(() => {
     if (!service) {
@@ -171,6 +193,59 @@ export default function HomeContent() {
   }, [loadMergeRequests]);
 
   useEffect(() => {
+    if (!service || !guidedReviewLocation) {
+      reviewLookupControllerRef.current?.abort();
+      reviewLookupControllerRef.current = null;
+      reviewLookupKeyRef.current = null;
+      setReviewingMergeRequest(null);
+      return;
+    }
+
+    const lookupKey = `${service.getInstanceUrl()}:${guidedReviewLocation.projectId}:${guidedReviewLocation.iid}`;
+    const mergeRequest = mergeRequests.find((candidate) => (
+      candidate.project_id === guidedReviewLocation.projectId && candidate.iid === guidedReviewLocation.iid
+    ));
+
+    if (mergeRequest) {
+      reviewLookupControllerRef.current?.abort();
+      reviewLookupControllerRef.current = null;
+      reviewLookupKeyRef.current = lookupKey;
+      setReviewingMergeRequest(mergeRequest);
+      return;
+    }
+
+    if (reviewLookupKeyRef.current === lookupKey) return;
+
+    reviewLookupControllerRef.current?.abort();
+    const controller = new AbortController();
+    reviewLookupControllerRef.current = controller;
+    reviewLookupKeyRef.current = lookupKey;
+    let active = true;
+
+    void service.getMergeRequest(guidedReviewLocation.projectId, guidedReviewLocation.iid, controller.signal)
+      .then((loadedMergeRequest) => {
+        if (active && !controller.signal.aborted) setReviewingMergeRequest(loadedMergeRequest);
+      })
+      .catch((loadError) => {
+        if (!active || controller.signal.aborted) return;
+        if (reviewLookupControllerRef.current === controller) reviewLookupKeyRef.current = null;
+        setError(loadError instanceof Error ? loadError.message : 'Unable to open this merge request for guided review.');
+      })
+      .finally(() => {
+        if (reviewLookupControllerRef.current === controller) reviewLookupControllerRef.current = null;
+      });
+
+    return () => {
+      active = false;
+      if (reviewLookupControllerRef.current === controller) {
+        controller.abort();
+        reviewLookupControllerRef.current = null;
+        reviewLookupKeyRef.current = null;
+      }
+    };
+  }, [guidedReviewLocation, mergeRequests, service]);
+
+  useEffect(() => {
     if (!service || initialProjectIds === null || initialProjectIds.length > 0 || loading || !autoRefreshEnabled || isHoveringMergeRequest) return;
 
     const refreshWhenVisible = () => {
@@ -215,6 +290,26 @@ export default function HomeContent() {
     setInitialProjectIds([]);
   };
 
+  const handleStartSemanticReview = useCallback((mergeRequest: GitLabMergeRequest) => {
+    const location = { projectId: mergeRequest.project_id, iid: mergeRequest.iid };
+    pushGuidedReviewURL(location);
+    setGuidedReviewLocation(location);
+    setReviewingMergeRequest(mergeRequest);
+  }, []);
+
+  const handleCloseGuidedReview = useCallback(() => {
+    const guidedReview = decodeGuidedReviewFromURL(new URLSearchParams(window.location.search));
+    if (guidedReview && isGuidedReviewHistoryEntry()) {
+      window.history.back();
+      return;
+    }
+
+    clearGuidedReviewURL();
+    setGuidedReviewLocation(null);
+    setReviewingMergeRequest(null);
+    void loadMergeRequests();
+  }, [loadMergeRequests]);
+
   const handleConfigured = useCallback((configuredService: GitLabService, configuredAi: AiProviderConfig | null) => {
     setService(configuredService);
     setAiConfig(configuredAi);
@@ -249,6 +344,7 @@ export default function HomeContent() {
         setInitialProjectIds([]);
         setSelectedMergeRequestId(null);
         setReviewingMergeRequest(null);
+        setGuidedReviewLocation(null);
         window.history.replaceState({}, '', window.location.pathname);
       }
     }
@@ -304,6 +400,7 @@ export default function HomeContent() {
     setAiConfig(null);
     setIsConnectionSettingsOpen(false);
     setReviewingMergeRequest(null);
+    setGuidedReviewLocation(null);
     setError(null);
     setFilters({ state: 'opened' });
     setInitialProjectIds([]);
@@ -343,10 +440,7 @@ export default function HomeContent() {
           service={service}
           mergeRequest={reviewingMergeRequest}
           aiConfig={aiConfig}
-          onClose={() => {
-            setReviewingMergeRequest(null);
-            void loadMergeRequests();
-          }}
+          onClose={handleCloseGuidedReview}
           onOpenAiSettings={() => setIsConnectionSettingsOpen(true)}
         />
         {connectionSettingsModal}
@@ -421,7 +515,7 @@ export default function HomeContent() {
           onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
           autoRefreshEnabled={autoRefreshEnabled}
           onAutoRefreshEnabledChange={handleAutoRefreshEnabledChange}
-          onStartSemanticReview={setReviewingMergeRequest}
+          onStartSemanticReview={handleStartSemanticReview}
         />
         {connectionSettingsModal}
       </>
@@ -509,7 +603,7 @@ export default function HomeContent() {
               scopeLabel={scopeLabel}
               selectedMergeRequestId={selectedMergeRequestId}
               onSelectedMergeRequestChange={setSelectedMergeRequestId}
-              onStartSemanticReview={setReviewingMergeRequest}
+              onStartSemanticReview={handleStartSemanticReview}
             />
           )}
         </main>

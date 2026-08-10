@@ -1,6 +1,43 @@
 import { FilterOptions } from '@/types/gitlab';
 
 const VALID_APPROVAL_STATES = new Set(['needs-review', 'partially-approved', 'approved']);
+const GUIDED_REVIEW_PROJECT_PARAM = 'reviewProject';
+const GUIDED_REVIEW_IID_PARAM = 'reviewIid';
+const GUIDED_REVIEW_HISTORY_KEY = 'gitlabMrViewerGuidedReview';
+
+export type GuidedReviewLocation = {
+  projectId: number;
+  iid: number;
+};
+
+const parsePositiveInteger = (value: string | null): number | null => {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+export const decodeGuidedReviewFromURL = (searchParams: URLSearchParams): GuidedReviewLocation | null => {
+  const projectId = parsePositiveInteger(searchParams.get(GUIDED_REVIEW_PROJECT_PARAM));
+  const iid = parsePositiveInteger(searchParams.get(GUIDED_REVIEW_IID_PARAM));
+  return projectId && iid ? { projectId, iid } : null;
+};
+
+const setGuidedReviewParams = (url: URL, guidedReview: GuidedReviewLocation | null) => {
+  if (guidedReview) {
+    url.searchParams.set(GUIDED_REVIEW_PROJECT_PARAM, guidedReview.projectId.toString());
+    url.searchParams.set(GUIDED_REVIEW_IID_PARAM, guidedReview.iid.toString());
+  } else {
+    url.searchParams.delete(GUIDED_REVIEW_PROJECT_PARAM);
+    url.searchParams.delete(GUIDED_REVIEW_IID_PARAM);
+  }
+};
+
+const withoutGuidedReviewHistoryMarker = (state: unknown): Record<string, unknown> => {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return {};
+  const nextState = { ...(state as Record<string, unknown>) };
+  delete nextState[GUIDED_REVIEW_HISTORY_KEY];
+  return nextState;
+};
 
 export const encodeFiltersToURL = (filters: FilterOptions, projectIds?: number[]): string => {
   const params = new URLSearchParams();
@@ -60,7 +97,7 @@ export const encodeFiltersToURL = (filters: FilterOptions, projectIds?: number[]
   return params.toString();
 };
 
-export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: FilterOptions; projectIds?: number[] } => {
+export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: FilterOptions; projectIds?: number[]; guidedReview: GuidedReviewLocation | null } => {
   const filters: FilterOptions = { state: 'opened' };
   let projectIds: number[] | undefined;
 
@@ -139,11 +176,14 @@ export const decodeFiltersFromURL = (searchParams: URLSearchParams): { filters: 
     }
   }
   
-  return { filters, projectIds };
+  return { filters, projectIds, guidedReview: decodeGuidedReviewFromURL(searchParams) };
 };
 
-export const updateURL = (filters: FilterOptions, projectIds?: number[]) => {
+export const updateURL = (filters: FilterOptions, projectIds?: number[], guidedReview?: GuidedReviewLocation | null) => {
   const url = new URL(window.location.href);
+  const currentGuidedReview = guidedReview === undefined
+    ? decodeGuidedReviewFromURL(url.searchParams)
+    : guidedReview;
   const queryString = encodeFiltersToURL(filters, projectIds);
   
   if (queryString) {
@@ -152,5 +192,27 @@ export const updateURL = (filters: FilterOptions, projectIds?: number[]) => {
     url.search = '';
   }
   
-  window.history.replaceState({}, '', url.toString());
+  setGuidedReviewParams(url, currentGuidedReview);
+  window.history.replaceState(window.history.state, '', url.toString());
+};
+
+export const pushGuidedReviewURL = (guidedReview: GuidedReviewLocation) => {
+  const url = new URL(window.location.href);
+  setGuidedReviewParams(url, guidedReview);
+  const currentState = window.history.state;
+  const nextState = currentState && typeof currentState === 'object' && !Array.isArray(currentState)
+    ? { ...(currentState as Record<string, unknown>), [GUIDED_REVIEW_HISTORY_KEY]: true }
+    : { [GUIDED_REVIEW_HISTORY_KEY]: true };
+  window.history.pushState(nextState, '', url.toString());
+};
+
+export const clearGuidedReviewURL = () => {
+  const url = new URL(window.location.href);
+  setGuidedReviewParams(url, null);
+  window.history.replaceState(withoutGuidedReviewHistoryMarker(window.history.state), '', url.toString());
+};
+
+export const isGuidedReviewHistoryEntry = (): boolean => {
+  const state = window.history.state;
+  return Boolean(state && typeof state === 'object' && !Array.isArray(state) && (state as Record<string, unknown>)[GUIDED_REVIEW_HISTORY_KEY] === true);
 };
