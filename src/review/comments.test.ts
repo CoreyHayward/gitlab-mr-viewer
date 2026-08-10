@@ -24,6 +24,22 @@ const note = (id: number, body: string, position?: GitLabMergeRequestDiscussion[
 });
 
 describe('diff comments', () => {
+  it('keeps code lines that begin with triple plus or minus markers inside a hunk', () => {
+    const parsed = parseDiff([
+      '--- a/example.txt',
+      '+++ b/example.txt',
+      '@@ -1,2 +1,2 @@',
+      '---removed code',
+      '+++added code'
+    ].join('\n'));
+
+    expect(parsed.allLines.map((line) => [line.kind, line.text])).toEqual([
+      ['meta', '@@ -1,2 +1,2 @@'],
+      ['remove', '--removed code'],
+      ['add', '++added code']
+    ]);
+  });
+
   it('keeps old and new coordinates while parsing a hunk', () => {
     const parsed = parseDiff(file.diff);
 

@@ -1,4 +1,4 @@
-import type { GitLabMergeRequestDiscussion } from '@/types/gitlab';
+import type { GitLabDiffCompleteness, GitLabMergeRequestDiscussion } from '@/types/gitlab';
 
 export type ReviewStatus =
   | 'not-started'
@@ -61,6 +61,7 @@ export type SemanticReviewWorkspaceData = {
     startSha?: string;
     headSha: string;
     changedFiles: number;
+    reviewInputSignature?: string;
   };
   review: SemanticReview;
   delta: ReviewDelta;
@@ -70,6 +71,7 @@ export type SemanticReviewWorkspaceData = {
   };
   discussions?: GitLabMergeRequestDiscussion[];
   truncated: boolean;
+  diffCompleteness?: GitLabDiffCompleteness;
 };
 
 export type SavedReviewState = {

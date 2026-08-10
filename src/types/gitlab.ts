@@ -18,7 +18,7 @@ export interface GitLabUser {
   id: number;
   name: string;
   username: string;
-  avatar_url: string;
+  avatar_url: string | null;
 }
 
 export interface GitLabApproval {
@@ -36,7 +36,7 @@ export interface GitLabMergeRequest {
   id: number;
   iid: number;
   title: string;
-  description: string;
+  description: string | null;
   state: 'opened' | 'closed' | 'merged';
   created_at: string;
   updated_at: string;
@@ -49,6 +49,11 @@ export interface GitLabMergeRequest {
   target_branch: string;
   web_url: string;
   project_id: number;
+  references?: {
+    short?: string;
+    relative?: string;
+    full?: string;
+  };
   project?: {
     id: number;
     name: string;
@@ -91,6 +96,20 @@ export interface GitLabMergeRequestChange {
   new_file?: boolean;
   deleted_file?: boolean;
   renamed_file?: boolean;
+  collapsed?: boolean;
+  too_large?: boolean;
+  generated_file?: boolean;
+}
+
+export interface GitLabDiffCompleteness {
+  complete: boolean;
+  truncated: boolean;
+  total_files?: number;
+  loaded_files: number;
+  collapsed_files: number;
+  too_large_files: number;
+  generated_files: number;
+  reason?: string;
 }
 
 export interface GitLabMergeRequestReviewDetails {
@@ -108,6 +127,7 @@ export interface GitLabMergeRequestReviewDetails {
     head_sha?: string;
   };
   changes?: GitLabMergeRequestChange[];
+  diff_completeness?: GitLabDiffCompleteness;
 }
 
 export type GitLabDiscussionLineType = 'old' | 'new';

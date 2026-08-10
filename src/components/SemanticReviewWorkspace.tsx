@@ -8,47 +8,49 @@ import {
   Bot,
   Check,
   ChevronDown,
-  ChevronRight,
   FileCode2,
   Flag,
   HelpCircle,
   Loader2,
   LockKeyhole,
   MessageSquare,
-  MessageSquarePlus,
   RefreshCw,
   Send,
   Sparkles,
   X
 } from 'lucide-react';
-import { askAiAboutReviewSection, createAiReviewOutline } from '@/review/ai';
+import { askAiAboutDiffSelection, askAiAboutReviewSection, createAiReviewOutline } from '@/review/ai';
 import {
   createDiscussionPosition,
+  discussionPosition,
   normalizeDiscussions,
   parseDiff,
-  threadLineIndexes,
-  threadLocationLabel,
-  type InlineReviewThread,
   type ParsedDiffLine
 } from '@/review/comments';
 import { createHeuristicReview, normaliseAiReview } from '@/review/organizeReview';
-import { readSemanticReviewCache, semanticReviewCacheKey, writeSemanticReviewCache } from '@/review/storage';
+import { legacySemanticReviewCacheKey, readSemanticReviewCache, reviewInputSignature, semanticReviewCacheKey, writeSemanticReviewCache } from '@/review/storage';
 import type {
   AiProviderConfig,
-  ReviewDelta,
   ReviewFileChange,
   ReviewStatus,
   SavedReviewState,
-  SemanticReviewWorkspaceData,
-  SemanticSection
+  SemanticReviewWorkspaceData
 } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
 import type {
-  GitLabDiscussionNote,
   GitLabMergeRequest,
   GitLabMergeRequestChange,
   GitLabMergeRequestReviewDetails
 } from '@/types/gitlab';
+import { useDialogFocus } from '@/hooks/useDialogFocus';
+import { APPROVAL_STEP_ID, buildReviewDelta, reconcileSavedReviewState } from '@/review/delta';
+import {
+  DiffFile,
+  ThreadCard,
+  type CommentAiResult,
+  type CommentDraft,
+  type RangeStart
+} from '@/components/review/ReviewDiffFile';
 
 interface SemanticReviewWorkspaceProps {
   service: GitLabService;
@@ -62,11 +64,6 @@ type ReviewSession = {
   workspace: SemanticReviewWorkspaceData;
   state: SavedReviewState;
 };
-
-const MAX_FILES = 90;
-const MAX_DIFF_PER_FILE = 8_000;
-const MAX_DIFF_TOTAL = 260_000;
-const APPROVAL_STEP_ID = '__guided-review-approval__';
 
 type ApprovalState = 'idle' | 'approving' | 'approved' | 'error';
 
@@ -98,31 +95,20 @@ const changedFileKind = (change: GitLabMergeRequestChange): ReviewFileChange['ki
 
 const compactChanges = (changes: GitLabMergeRequestChange[] | undefined) => {
   const source = Array.isArray(changes) ? changes : [];
-  let used = 0;
-  let truncated = source.length > MAX_FILES;
   const compacted: ReviewFileChange[] = [];
 
-  for (const change of source.slice(0, MAX_FILES)) {
+  for (const change of source) {
     const path = String(change.new_path ?? change.old_path ?? '').trim();
     if (!path) continue;
-    const rawDiff = String(change.diff ?? '');
-    const remaining = MAX_DIFF_TOTAL - used;
-    if (remaining <= 0) {
-      truncated = true;
-      break;
-    }
-    const diff = rawDiff.slice(0, Math.min(MAX_DIFF_PER_FILE, remaining));
-    if (rawDiff.length > diff.length) truncated = true;
-    used += diff.length;
     compacted.push({
       path,
       oldPath: change.old_path && change.old_path !== path ? change.old_path : undefined,
       kind: changedFileKind(change),
-      diff
+      diff: String(change.diff ?? '')
     });
   }
 
-  return { changes: compacted, truncated };
+  return compacted;
 };
 
 const headSha = (raw: GitLabMergeRequestReviewDetails, mergeRequest: GitLabMergeRequest) => {
@@ -132,247 +118,10 @@ const headSha = (raw: GitLabMergeRequestReviewDetails, mergeRequest: GitLabMerge
 
 const validSha = (value: string | undefined): value is string => Boolean(value && /^[a-f0-9]{7,80}$/i.test(value));
 
-const projectPathFor = async (service: GitLabService, mergeRequest: GitLabMergeRequest) => {
+const projectPathFor = async (service: GitLabService, mergeRequest: GitLabMergeRequest, signal?: AbortSignal) => {
   if (mergeRequest.project?.path_with_namespace) return mergeRequest.project.path_with_namespace;
-  return (await service.getProject(mergeRequest.project_id)).path_with_namespace;
+  return (await service.getProject(mergeRequest.project_id, signal)).path_with_namespace;
 };
-
-const buildDelta = async (
-  service: GitLabService,
-  mergeRequest: GitLabMergeRequest,
-  previousHeadSha: string | undefined,
-  currentHeadSha: string,
-  signal?: AbortSignal
-): Promise<ReviewDelta> => {
-  if (!previousHeadSha) {
-    return { state: 'first-review', summary: ['This is the first saved review for this merge request.'], changedPaths: [], newPaths: [] };
-  }
-  if (previousHeadSha === currentHeadSha) {
-    return { state: 'unchanged', summary: ['No new commit has landed since this review was last saved.'], changedPaths: [], newPaths: [] };
-  }
-  if (!/^[a-f0-9]{7,80}$/i.test(previousHeadSha) || !/^[a-f0-9]{7,80}$/i.test(currentHeadSha)) {
-    return {
-      state: 'updated',
-      summary: ['The merge request has a new head commit since you last saved this review.', 'Previously reviewed concepts are marked stale conservatively.'],
-      changedPaths: [],
-      newPaths: []
-    };
-  }
-
-  try {
-    const comparison = await service.compareMergeRequestCommits(mergeRequest.project_id, previousHeadSha, currentHeadSha, signal);
-    const diffs = comparison.diffs ?? [];
-    const changedPaths = diffs
-      .map((diff) => String(diff.new_path ?? diff.old_path ?? '').trim())
-      .filter(Boolean)
-      .slice(0, 24);
-    const newPaths = diffs
-      .filter((diff) => diff.new_file)
-      .map((diff) => String(diff.new_path ?? '').trim())
-      .filter(Boolean)
-      .slice(0, 12);
-    return {
-      state: 'updated',
-      summary: [
-        `${changedPaths.length || diffs.length} ${changedPaths.length === 1 ? 'file changed' : 'files changed'} since you last saved this review.`,
-        ...(newPaths.length ? [`${newPaths.length} ${newPaths.length === 1 ? 'new file was' : 'new files were'} introduced.`] : []),
-        'Previously reviewed concepts touching those files are marked stale.'
-      ],
-      changedPaths,
-      newPaths
-    };
-  } catch {
-    return {
-      state: 'updated',
-      summary: ['The merge request has a new head commit since you last saved this review.', 'The file-by-file delta was unavailable, so reviewed concepts are marked stale conservatively.'],
-      changedPaths: [],
-      newPaths: []
-    };
-  }
-};
-
-const cleanSavedState = (sections: SemanticSection[], saved: SavedReviewState | undefined, delta: ReviewDelta): SavedReviewState => {
-  const sectionIds = new Set(sections.map((section) => section.id));
-  const statuses: SavedReviewState['statuses'] = {};
-  const notes: SavedReviewState['notes'] = {};
-  for (const [id, status] of Object.entries(saved?.statuses ?? {})) {
-    if (sectionIds.has(id)) statuses[id] = status;
-  }
-  for (const [id, note] of Object.entries(saved?.notes ?? {})) {
-    if (sectionIds.has(id) && typeof note === 'string') notes[id] = note;
-  }
-
-  if (delta.state === 'updated') {
-    const changed = new Set(delta.changedPaths);
-    for (const section of sections) {
-      const touched = changed.size === 0 || section.filePaths.some((path) => changed.has(path));
-      if (touched && (statuses[section.id] === 'reviewed' || statuses[section.id] === 'in-progress')) {
-        statuses[section.id] = 'stale';
-      }
-    }
-  }
-
-  const selectedSectionId = saved?.selectedSectionId === APPROVAL_STEP_ID
-    ? APPROVAL_STEP_ID
-    : saved?.selectedSectionId && sectionIds.has(saved.selectedSectionId)
-    ? saved.selectedSectionId
-    : sections[0]?.id;
-  return { statuses, notes, selectedSectionId };
-};
-
-type CommentDraft = {
-  file: ReviewFileChange;
-  start: ParsedDiffLine;
-  end: ParsedDiffLine;
-};
-
-type RangeStart = {
-  filePath: string;
-  line: ParsedDiffLine;
-};
-
-type CommentComposerProps = {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onCancel: () => void;
-  saving: boolean;
-  error: string | null;
-  autoFocus?: boolean;
-};
-
-function CommentComposer({ label, value, onChange, onSubmit, onCancel, saving, error, autoFocus = false }: CommentComposerProps) {
-  return (
-    <form onSubmit={onSubmit} className="mt-2 rounded-xl border border-indigo-200 bg-white p-3 text-slate-950 shadow-lg dark:border-indigo-400/30 dark:bg-slate-900 dark:text-white">
-      <div className="flex items-center justify-between gap-3"><span className="text-xs font-bold uppercase tracking-[0.14em] text-indigo-700 dark:text-indigo-300">{label}</span><button type="button" onClick={onCancel} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white" aria-label="Cancel comment"><X className="h-4 w-4" /></button></div>
-      <textarea value={value} onChange={(event) => onChange(event.target.value)} autoFocus={autoFocus} rows={4} placeholder="Leave a clear, actionable comment…" className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" aria-label={label} />
-      {error && <p className="mt-2 text-xs leading-5 text-rose-700 dark:text-rose-200" role="alert">{error}</p>}
-      <div className="mt-3 flex items-center justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">Cancel</button><button type="submit" disabled={saving || !value.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}{saving ? 'Posting…' : 'Post comment'}</button></div>
-    </form>
-  );
-}
-
-type ThreadCardProps = {
-  thread: InlineReviewThread;
-  replyThreadId: string | null;
-  replyText: string;
-  replyError: string | null;
-  replySaving: boolean;
-  onStartReply: (threadId: string) => void;
-  onReplyTextChange: (value: string) => void;
-  onSubmitReply: (event: FormEvent<HTMLFormElement>, threadId: string) => void;
-  onCancelReply: () => void;
-};
-
-const noteAuthor = (note: GitLabDiscussionNote) => note.author?.name || note.author?.username || 'GitLab user';
-
-function ThreadCard({ thread, replyThreadId, replyText, replyError, replySaving, onStartReply, onReplyTextChange, onSubmitReply, onCancelReply }: ThreadCardProps) {
-  const rootNote = thread.discussion.notes[0];
-  const [collapsed, setCollapsed] = useState(thread.resolved);
-
-  useEffect(() => {
-    if (thread.resolved) setCollapsed(true);
-  }, [thread.resolved]);
-
-  if (!rootNote) return null;
-
-  const preview = rootNote.body.replace(/\s+/g, ' ').trim();
-
-  return (
-    <article className={`mt-2 rounded-xl border p-3 text-left shadow-sm ${thread.stale ? 'border-violet-300 bg-violet-50/95 dark:border-violet-400/35 dark:bg-violet-950/45' : 'border-slate-200 bg-white dark:border-white/15 dark:bg-slate-900/95'}`} aria-label={`Discussion ${threadLocationLabel(thread)}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700 dark:bg-indigo-400/15 dark:text-indigo-200">{noteAuthor(rootNote).slice(0, 1).toUpperCase()}</span><span className="truncate text-xs font-semibold text-slate-800 dark:text-slate-100">{noteAuthor(rootNote)}</span><span className="text-[11px] text-slate-400">{rootNote.created_at ? new Date(rootNote.created_at).toLocaleDateString() : ''}</span></div>
-        <div className="flex shrink-0 items-center gap-1.5"><span className="text-[10px] font-bold uppercase tracking-wide"><span className={thread.stale ? 'text-violet-700 dark:text-violet-200' : thread.resolved ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400'}>{thread.stale ? 'Stale diff' : thread.resolved ? 'Resolved' : threadLocationLabel(thread)}</span></span><button type="button" onClick={() => setCollapsed((value) => !value)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white" aria-expanded={!collapsed} aria-label={collapsed ? 'Expand comments' : 'Collapse comments'}>{collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button></div>
-      </div>
-      {collapsed ? <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{preview || 'No comment text'}</p> : <>
-        {thread.stale && <p className="mt-2 rounded-lg border border-violet-200 bg-white/60 px-2.5 py-2 text-[11px] leading-5 text-violet-900 dark:border-violet-400/20 dark:bg-white/[0.04] dark:text-violet-100">This thread is attached to an older version of the diff. Read-only placement is preserved here so the conversation is not lost.</p>}
-        <div className="mt-3 space-y-3">{thread.discussion.notes.map((note, index) => <div key={note.id} className={index === 0 ? '' : 'border-t border-slate-200 pt-3 dark:border-white/10'}><div className="mb-1 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400"><span className="font-semibold text-slate-700 dark:text-slate-200">{noteAuthor(note)}</span><span>·</span><span>{note.created_at ? new Date(note.created_at).toLocaleDateString() : ''}</span>{note.system && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold dark:bg-white/10">System</span>}</div><p className="whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">{note.body}</p></div>)}</div>
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-200 pt-2.5 dark:border-white/10"><span className="text-[11px] text-slate-400">{thread.discussion.notes.length} {thread.discussion.notes.length === 1 ? 'comment' : 'comments'}</span><button type="button" onClick={() => onStartReply(thread.id)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/10"><MessageSquare className="h-3.5 w-3.5" />Reply</button></div>
-        {replyThreadId === thread.id && <CommentComposer label="Reply to thread" value={replyText} onChange={onReplyTextChange} onSubmit={(event) => onSubmitReply(event, thread.id)} onCancel={onCancelReply} saving={replySaving} error={replyError} />}
-      </>}
-    </article>
-  );
-}
-
-type DiffFileProps = {
-  file: ReviewFileChange;
-  threads: InlineReviewThread[];
-  rangeMode: boolean;
-  rangeStart: RangeStart | null;
-  draft: CommentDraft | null;
-  commentText: string;
-  commentError: string | null;
-  commentSaving: boolean;
-  replyThreadId: string | null;
-  replyText: string;
-  replyError: string | null;
-  replySaving: boolean;
-  commentsEnabled: boolean;
-  onLineAction: (line: ParsedDiffLine, shiftKey: boolean) => void;
-  onToggleRange: () => void;
-  onCommentTextChange: (value: string) => void;
-  onSubmitComment: (event: FormEvent<HTMLFormElement>) => void;
-  onCancelComment: () => void;
-  onStartReply: (threadId: string) => void;
-  onReplyTextChange: (value: string) => void;
-  onSubmitReply: (event: FormEvent<HTMLFormElement>, threadId: string) => void;
-  onCancelReply: () => void;
-};
-
-function DiffFile({ file, threads, rangeMode, rangeStart, draft, commentText, commentError, commentSaving, replyThreadId, replyText, replyError, replySaving, commentsEnabled, onLineAction, onToggleRange, onCommentTextChange, onSubmitComment, onCancelComment, onStartReply, onReplyTextChange, onSubmitReply, onCancelReply }: DiffFileProps) {
-  const [open, setOpen] = useState(true);
-  const parsed = useMemo(() => parseDiff(file.diff), [file.diff]);
-  const kindLabel = file.kind === 'added' ? 'New file' : file.kind === 'deleted' ? 'Deleted' : file.kind === 'renamed' ? 'Renamed' : 'Changed';
-  const kindClass = file.kind === 'added'
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200'
-    : file.kind === 'deleted'
-      ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-100'
-      : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300';
-
-  return (
-    <figure className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
-      <div onClick={() => setOpen((value) => !value)} className="flex cursor-pointer items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-white/10">
-        <button type="button" className="min-w-0 text-left" aria-expanded={open}>
-          <span className={`mr-2 inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${kindClass}`}>{kindLabel}</span>
-          <code className="break-all text-xs font-medium text-slate-800 dark:text-slate-100">{file.path}</code>
-          {file.oldPath && <span className="mt-1 block break-all text-xs text-slate-400">renamed from {file.oldPath}</span>}
-        </button>
-        <div className="flex shrink-0 items-center gap-2"><span className="text-xs font-medium"><span className="text-emerald-600 dark:text-emerald-300">+{parsed.additions}</span><span className="ml-2 text-rose-600 dark:text-rose-300">−{parsed.deletions}</span></span><button type="button" onClick={(event) => { event.stopPropagation(); onToggleRange(); }} disabled={!commentsEnabled} className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${rangeMode ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-400/35 dark:bg-indigo-500/10 dark:text-indigo-200' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/[0.06]'} disabled:cursor-not-allowed disabled:opacity-50`}>{rangeStart?.filePath === file.path ? 'Choose end line' : 'Select range'}</button>{open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}</div>
-      </div>
-      {open && (
-        <>
-          <div className="max-h-[42rem] overflow-x-hidden overflow-y-auto bg-slate-950 py-2 text-xs leading-5 text-slate-200" tabIndex={0} aria-label={`Diff for ${file.path}`}>
-            {parsed.lines.map((line) => {
-              const lineClass = line.kind === 'add' ? 'bg-emerald-500/15 text-emerald-100' : line.kind === 'remove' ? 'bg-rose-500/15 text-rose-100' : line.kind === 'meta' ? 'bg-indigo-500/15 text-indigo-200' : '';
-              const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
-              const threadRows = threads.filter((thread) => {
-                const indexes = threadLineIndexes(parsed.allLines, thread);
-                const index = parsed.allLines.findIndex((candidate) => candidate.id === line.id);
-                return indexes && index === indexes.end;
-              });
-              const draftEnd = draft?.file.path === file.path && draft.end.id === line.id;
-              const rangeIndices = rangeStart?.filePath === file.path && rangeStart.line.id !== line.id
-                ? threadLineIndexes(parsed.allLines, { start: { type: rangeStart.line.kind === 'remove' ? 'old' : 'new', line: (rangeStart.line.kind === 'remove' ? rangeStart.line.oldLine : rangeStart.line.newLine) ?? 0 }, end: { type: line.kind === 'remove' ? 'old' : 'new', line: (line.kind === 'remove' ? line.oldLine : line.newLine) ?? 0 } })
-                : null;
-              const rangeSelected = rangeStart?.filePath === file.path && rangeStart.line.id === line.id;
-              return <div key={line.id}>
-                <div className={`group grid min-w-0 grid-cols-[2rem_3.5rem_3.5rem_1.25rem_minmax(0,1fr)] px-3 ${lineClass} ${rangeSelected || rangeIndices ? 'bg-indigo-500/25' : ''}`}>
-                  <button type="button" onClick={(event) => onLineAction(line, event.shiftKey)} disabled={!commentsEnabled || line.kind === 'meta'} className="flex items-center justify-center rounded text-slate-500 opacity-0 transition-opacity hover:bg-white/10 hover:text-white group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={rangeMode ? `Select ${rangeStart ? 'end' : 'start'} line for comment` : 'Comment on this line'}><MessageSquarePlus className="h-3.5 w-3.5" /></button>
-                  <span className="select-none pr-3 text-right text-slate-500">{line.oldLine ?? ''}</span><span className="select-none pr-3 text-right text-slate-500">{line.newLine ?? ''}</span><span className="select-none text-slate-500">{marker}</span><code className="diff-line-text min-w-0">{line.text || ' '}</code>
-                </div>
-                {threadRows.map((thread) => <ThreadCard key={thread.id} thread={thread} replyThreadId={replyThreadId} replyText={replyText} replyError={replyError} replySaving={replySaving} onStartReply={onStartReply} onReplyTextChange={onReplyTextChange} onSubmitReply={onSubmitReply} onCancelReply={onCancelReply} />)}
-                {draftEnd && <CommentComposer label={draft.start.id === draft.end.id ? 'Comment on line' : 'Comment on selected lines'} value={commentText} onChange={onCommentTextChange} onSubmit={onSubmitComment} onCancel={onCancelComment} saving={commentSaving} error={commentError} autoFocus />}
-              </div>;
-            })}
-            {parsed.clipped && <div className="grid min-w-0 grid-cols-[2rem_3.5rem_3.5rem_1.25rem_minmax(0,1fr)] px-3 text-slate-400"><span /><span /><span /><span>…</span><span className="min-w-0">Diff clipped for this focused first pass</span></div>}
-          </div>
-          {file.explanation && <figcaption className="border-t border-slate-100 px-4 py-3 text-xs leading-5 text-slate-600 dark:border-white/10 dark:text-slate-300"><strong className="mr-1 font-semibold text-slate-800 dark:text-white">Why this file is here:</strong>{file.explanation}</figcaption>}
-        </>
-      )}
-    </figure>
-  );
-}
 
 function LoadingReview() {
   return (
@@ -407,16 +156,27 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   const [commentText, setCommentText] = useState('');
   const [commentError, setCommentError] = useState<string | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
+  const [commentAiResult, setCommentAiResult] = useState<CommentAiResult | null>(null);
+  const [commentAiError, setCommentAiError] = useState<string | null>(null);
+  const [commentAsking, setCommentAsking] = useState(false);
   const [rangeMode, setRangeMode] = useState(false);
   const [rangeStart, setRangeStart] = useState<RangeStart | null>(null);
   const [replyThreadId, setReplyThreadId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [replyError, setReplyError] = useState<string | null>(null);
   const [replySaving, setReplySaving] = useState(false);
-  const questionRef = useRef<HTMLInputElement | null>(null);
+  const questionRef = useRef<HTMLTextAreaElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const sectionAskControllerRef = useRef<AbortController | null>(null);
+  const commentAskControllerRef = useRef<AbortController | null>(null);
+  const latestSessionRef = useRef<ReviewSession | null>(null);
+  const shortcutsDialogRef = useDialogFocus<HTMLDivElement>(showShortcuts, () => setShowShortcuts(false));
   const cacheKey = useMemo(
-    () => semanticReviewCacheKey(service.getInstanceUrl(), mergeRequest.project_id, mergeRequest.iid),
+    () => semanticReviewCacheKey(service.getInstanceUrl(), service.getCurrentUserId(), mergeRequest.project_id, mergeRequest.iid),
+    [mergeRequest.iid, mergeRequest.project_id, service]
+  );
+  const legacyCacheKey = useMemo(
+    () => legacySemanticReviewCacheKey(service.getInstanceUrl(), mergeRequest.project_id, mergeRequest.iid),
     [mergeRequest.iid, mergeRequest.project_id, service]
   );
 
@@ -427,13 +187,21 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setLoading(true);
     setError(null);
     setNotice(null);
+    sectionAskControllerRef.current?.abort();
+    sectionAskControllerRef.current = null;
     setAnswer(null);
     setAskError(null);
+    setAsking(false);
     setApprovalState('idle');
     setApprovalError(null);
     setCommentDraft(null);
     setCommentText('');
     setCommentError(null);
+    commentAskControllerRef.current?.abort();
+    commentAskControllerRef.current = null;
+    setCommentAiResult(null);
+    setCommentAiError(null);
+    setCommentAsking(false);
     setRangeMode(false);
     setRangeStart(null);
     setReplyThreadId(null);
@@ -443,7 +211,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     try {
       const [rawResult, projectPathResult, discussionsResult] = await Promise.allSettled([
         service.getMergeRequestReviewDetails(mergeRequest.project_id, mergeRequest.iid, controller.signal),
-        projectPathFor(service, mergeRequest),
+        projectPathFor(service, mergeRequest, controller.signal),
         service.getMergeRequestDiscussions(mergeRequest.project_id, mergeRequest.iid, controller.signal)
       ]);
       if (controller.signal.aborted) return;
@@ -451,38 +219,55 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
       if (projectPathResult.status === 'rejected') throw projectPathResult.reason;
       const raw = rawResult.value;
       const projectPath = projectPathResult.value;
-      const { changes, truncated } = compactChanges(raw.changes);
+      const changes = compactChanges(raw.changes);
+      const truncated = Boolean(raw.diff_completeness?.truncated);
       if (!changes.length) throw new Error('GitLab returned no reviewable changes for this merge request.');
 
-      const previous = readSemanticReviewCache(cacheKey);
+      const previous = readSemanticReviewCache(cacheKey, legacyCacheKey);
       const discussions = discussionsResult.status === 'fulfilled'
         ? discussionsResult.value
         : previous?.workspace.discussions ?? [];
-      const discussionsFailure = discussionsResult.status === 'rejected' && !previous?.workspace.discussions
-        ? (discussionsResult.reason instanceof Error ? discussionsResult.reason.message : 'GitLab did not return existing discussions.')
+      const discussionsFailure = discussionsResult.status === 'rejected'
+        ? `${discussionsResult.reason instanceof Error ? discussionsResult.reason.message : 'GitLab did not return existing discussions.'}${previous?.workspace.discussions ? ' Showing the saved discussion cache, which may be stale.' : ''}`
         : null;
       const currentHeadSha = headSha(raw, mergeRequest);
-      const delta = await buildDelta(service, mergeRequest, previous?.workspace.mergeRequest.headSha, currentHeadSha, controller.signal);
+      const delta = await buildReviewDelta(service, mergeRequest, previous?.workspace.mergeRequest.headSha, currentHeadSha, controller.signal);
       if (controller.signal.aborted) return;
 
       const title = raw.title?.trim() || mergeRequest.title || `Merge request !${mergeRequest.iid}`;
       const author = raw.author?.name || raw.author?.username || mergeRequest.author.name || 'GitLab author';
+      const description = raw.description?.slice(0, 3_000) ?? '';
+      const sourceBranch = raw.source_branch ?? mergeRequest.source_branch;
+      const targetBranch = raw.target_branch ?? mergeRequest.target_branch;
+      const baseSha = raw.diff_refs?.base_sha;
+      const startSha = raw.diff_refs?.start_sha;
+      const inputSignature = reviewInputSignature({
+        title,
+        description,
+        sourceBranch,
+        targetBranch,
+        baseSha,
+        startSha,
+        headSha: currentHeadSha,
+        changes
+      });
       const metadata = {
         projectId: mergeRequest.project_id,
         projectPath,
         iid: raw.iid ?? mergeRequest.iid,
         title,
         author,
-        sourceBranch: raw.source_branch ?? mergeRequest.source_branch,
-        targetBranch: raw.target_branch ?? mergeRequest.target_branch,
+        sourceBranch,
+        targetBranch,
         webUrl: raw.web_url ?? mergeRequest.web_url,
-        baseSha: raw.diff_refs?.base_sha,
-        startSha: raw.diff_refs?.start_sha,
+        baseSha,
+        startSha,
         headSha: currentHeadSha,
-        changedFiles: Array.isArray(raw.changes) ? raw.changes.length : changes.length
+        changedFiles: raw.diff_completeness?.total_files ?? changes.length,
+        reviewInputSignature: inputSignature
       };
 
-      const shouldReuseCachedOutline = previous?.workspace.mergeRequest.headSha === currentHeadSha && !forceOrganize && (!aiConfig || previous.workspace.ai.used);
+      const shouldReuseCachedOutline = previous?.workspace.mergeRequest.reviewInputSignature === inputSignature && !forceOrganize && (!aiConfig || previous.workspace.ai.used);
       let workspace: SemanticReviewWorkspaceData;
       let aiFailure: string | null = null;
 
@@ -492,17 +277,18 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           mergeRequest: metadata,
           delta,
           discussions,
-          truncated
+          truncated,
+          diffCompleteness: raw.diff_completeness
         };
       } else {
-        const fallback = createHeuristicReview(title, changes, raw.description?.slice(0, 3_000) ?? '');
+        const fallback = createHeuristicReview(title, changes, description);
         let review = fallback;
         let aiUsed = false;
         if (aiConfig) {
           try {
             const outline = await createAiReviewOutline(aiConfig, {
               title,
-              description: raw.description?.slice(0, 3_000) ?? '',
+              description,
               sourceBranch: metadata.sourceBranch,
               targetBranch: metadata.targetBranch
             }, changes, controller.signal);
@@ -519,11 +305,12 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           delta,
           ai: { configured: Boolean(aiConfig), used: aiUsed },
           discussions,
-          truncated
+          truncated,
+          diffCompleteness: raw.diff_completeness
         };
       }
 
-      const state = cleanSavedState(workspace.review.sections, previous?.state, delta);
+      const state = reconcileSavedReviewState(workspace.review.sections, previous?.state, delta);
       setSession({ workspace, state });
       const notices = [
         aiFailure ? `Using local semantic grouping because the AI request did not complete: ${aiFailure}` : null,
@@ -532,7 +319,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
       setNotice(notices.length ? notices.join(' ') : null);
     } catch (loadError) {
       if (!controller.signal.aborted) {
-        const previous = readSemanticReviewCache(cacheKey);
+        const previous = readSemanticReviewCache(cacheKey, legacyCacheKey);
         if (previous) {
           setSession(previous);
           setNotice('GitLab is unavailable, so this browser is showing your saved review cache.');
@@ -543,20 +330,33 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [aiConfig, cacheKey, mergeRequest, service]);
+  }, [aiConfig, cacheKey, legacyCacheKey, mergeRequest, service]);
 
   useEffect(() => {
     void loadReview();
-    return () => controllerRef.current?.abort();
+    return () => {
+      controllerRef.current?.abort();
+      sectionAskControllerRef.current?.abort();
+      commentAskControllerRef.current?.abort();
+    };
   }, [loadReview]);
 
   useEffect(() => {
     if (!session) return;
-    const persisted = writeSemanticReviewCache(cacheKey, session.workspace, session.state);
-    if (!persisted) {
-      setNotice((current) => current ?? 'This review remains open, but browser storage could not save its full diff.');
-    }
+    latestSessionRef.current = session;
+    const timer = window.setTimeout(() => {
+      const persisted = writeSemanticReviewCache(cacheKey, session.workspace, session.state);
+      if (!persisted) {
+        setNotice((current) => current ?? 'This review remains open, but browser storage could not save its full diff.');
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
   }, [cacheKey, session]);
+
+  useEffect(() => () => {
+    const latest = latestSessionRef.current;
+    if (latest) writeSemanticReviewCache(cacheKey, latest.workspace, latest.state);
+  }, [cacheKey]);
 
   const workspace = session?.workspace;
   const sections = useMemo(() => workspace?.review.sections ?? [], [workspace]);
@@ -566,10 +366,18 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
   const reviewedCount = sections.filter((section) => session?.state.statuses[section.id] === 'reviewed').length;
   const progressPercent = sections.length ? Math.round((reviewedCount / sections.length) * 100) : 0;
   const isApprovalStep = selectedId === APPROVAL_STEP_ID;
-  const commentFiles = useMemo(
-    () => sections.flatMap((section) => section.files.map((file) => ({ file, lines: parseDiff(file.diff, Number.POSITIVE_INFINITY).allLines }))),
-    [sections]
-  );
+  const commentFiles = useMemo(() => {
+    const discussionPaths = new Set<string>();
+    for (const discussion of workspace?.discussions ?? []) {
+      const position = discussionPosition(discussion);
+      if (position?.new_path) discussionPaths.add(position.new_path);
+      if (position?.old_path) discussionPaths.add(position.old_path);
+    }
+    if (discussionPaths.size === 0) return [];
+    return sections.flatMap((section) => section.files
+      .filter((file) => discussionPaths.has(file.path) || Boolean(file.oldPath && discussionPaths.has(file.oldPath)))
+      .map((file) => ({ file, lines: parseDiff(file.diff, Number.POSITIVE_INFINITY).allLines })));
+  }, [sections, workspace?.discussions]);
   const normalizedThreads = useMemo(
     () => normalizeDiscussions(workspace?.discussions, workspace?.mergeRequest.headSha ?? '', commentFiles),
     [commentFiles, workspace?.discussions, workspace?.mergeRequest.headSha]
@@ -588,16 +396,32 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setSession((current) => current ? { ...current, workspace: updater(current.workspace) } : current);
   }, []);
 
+  const cancelSectionAsk = useCallback(() => {
+    sectionAskControllerRef.current?.abort();
+    sectionAskControllerRef.current = null;
+    setAsking(false);
+  }, []);
+
+  const clearCommentAi = useCallback(() => {
+    commentAskControllerRef.current?.abort();
+    commentAskControllerRef.current = null;
+    setCommentAiResult(null);
+    setCommentAiError(null);
+    setCommentAsking(false);
+  }, []);
+
   const cancelCommentDraft = useCallback(() => {
     setCommentDraft(null);
     setCommentText('');
     setCommentError(null);
-  }, []);
+    clearCommentAi();
+  }, [clearCommentAi]);
 
   const handleLineAction = useCallback((file: ReviewFileChange, line: ParsedDiffLine, shiftKey: boolean) => {
     if (!commentsEnabled || line.kind === 'meta') return;
     const shouldSelectRange = rangeMode || shiftKey;
     if (!shouldSelectRange) {
+      clearCommentAi();
       setCommentDraft({ file, start: line, end: line });
       setCommentText('');
       setCommentError(null);
@@ -605,6 +429,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     }
 
     if (!rangeStart || rangeStart.filePath !== file.path) {
+      clearCommentAi();
       setRangeStart({ filePath: file.path, line });
       setCommentDraft(null);
       setCommentError(null);
@@ -622,20 +447,22 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
       ? [parsed.allLines[startIndex], parsed.allLines[endIndex]]
       : [parsed.allLines[endIndex], parsed.allLines[startIndex]];
     setCommentDraft({ file, start: first, end: last });
+    clearCommentAi();
     setCommentText('');
     setCommentError(null);
     setRangeStart(null);
     setRangeMode(false);
-  }, [commentsEnabled, rangeMode, rangeStart]);
+  }, [clearCommentAi, commentsEnabled, rangeMode, rangeStart]);
 
   const toggleRangeMode = useCallback(() => {
     if (!commentsEnabled) return;
+    clearCommentAi();
     setCommentDraft(null);
     setCommentText('');
     setCommentError(null);
     setRangeStart(null);
     setRangeMode((value) => !value);
-  }, [commentsEnabled]);
+  }, [clearCommentAi, commentsEnabled]);
 
   const submitComment = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -670,6 +497,41 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
       setCommentSaving(false);
     }
   }, [cancelCommentDraft, commentDraft, commentText, service, updateWorkspace, workspace]);
+
+  const dismissCommentAi = useCallback(() => {
+    setCommentAiResult(null);
+    setCommentAiError(null);
+  }, []);
+
+  const askAboutCommentDraft = useCallback(async () => {
+    if (!aiConfig) {
+      onOpenAiSettings();
+      return;
+    }
+    if (!selected || !commentDraft || !commentText.trim()) return;
+
+    commentAskControllerRef.current?.abort();
+    const controller = new AbortController();
+    commentAskControllerRef.current = controller;
+    const askedQuestion = commentText.trim();
+    setCommentAsking(true);
+    setCommentAiResult(null);
+    setCommentAiError(null);
+
+    try {
+      const response = await askAiAboutDiffSelection(aiConfig, askedQuestion, selected, commentDraft, controller.signal);
+      if (!controller.signal.aborted) setCommentAiResult({ question: askedQuestion, answer: response });
+    } catch (askRequestError) {
+      if (!controller.signal.aborted) {
+        setCommentAiError(askRequestError instanceof Error ? askRequestError.message : 'Unable to ask the AI about this selected code.');
+      }
+    } finally {
+      if (commentAskControllerRef.current === controller) {
+        commentAskControllerRef.current = null;
+        setCommentAsking(false);
+      }
+    }
+  }, [aiConfig, commentDraft, commentText, onOpenAiSettings, selected]);
 
   const startReply = useCallback((threadId: string) => {
     setReplyThreadId(threadId);
@@ -722,10 +584,11 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setRangeStart(null);
     setRangeMode(false);
     cancelReply();
+    cancelSectionAsk();
     setAnswer(null);
     setAskError(null);
     scrollToReviewTop();
-  }, [cancelCommentDraft, cancelReply, scrollToReviewTop, updateState]);
+  }, [cancelCommentDraft, cancelReply, cancelSectionAsk, scrollToReviewTop, updateState]);
 
   const selectApprovalStep = useCallback(() => {
     updateState((state) => ({ ...state, selectedSectionId: APPROVAL_STEP_ID }));
@@ -733,10 +596,11 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     setRangeStart(null);
     setRangeMode(false);
     cancelReply();
+    cancelSectionAsk();
     setAnswer(null);
     setAskError(null);
     scrollToReviewTop();
-  }, [cancelCommentDraft, cancelReply, scrollToReviewTop, updateState]);
+  }, [cancelCommentDraft, cancelReply, cancelSectionAsk, scrollToReviewTop, updateState]);
 
   const setStatus = useCallback((id: string, status: ReviewStatus) => {
     updateState((state) => ({ ...state, statuses: { ...state.statuses, [id]: status } }));
@@ -759,10 +623,15 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
         selectedSectionId: next?.id ?? (reviewComplete ? APPROVAL_STEP_ID : selected.id)
       };
     });
+    cancelCommentDraft();
+    setRangeStart(null);
+    setRangeMode(false);
+    cancelReply();
+    cancelSectionAsk();
     setAnswer(null);
     setAskError(null);
     scrollToReviewTop();
-  }, [isApprovalStep, sections, scrollToReviewTop, selected, selectedIndex, updateState]);
+  }, [cancelCommentDraft, cancelReply, cancelSectionAsk, isApprovalStep, sections, scrollToReviewTop, selected, selectedIndex, updateState]);
 
   const approveReview = useCallback(async () => {
     if (!workspace || approvalState === 'approving' || approvalState === 'approved') return;
@@ -783,6 +652,10 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (showShortcuts) {
+        if (event.key === '?') setShowShortcuts(false);
+        return;
+      }
       if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey || !selected || isApprovalStep) return;
       const key = event.key.toLowerCase();
       if (key === '?') {
@@ -819,21 +692,30 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [aiConfig, isApprovalStep, moveNext, sections, selectSection, selected, selectedIndex, setStatus]);
+  }, [aiConfig, isApprovalStep, moveNext, sections, selectSection, selected, selectedIndex, setStatus, showShortcuts]);
 
   const askQuestion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!aiConfig || !selected || !question.trim()) return;
+    sectionAskControllerRef.current?.abort();
+    const controller = new AbortController();
+    sectionAskControllerRef.current = controller;
+    const askedQuestion = question.trim();
     setAsking(true);
     setAskError(null);
     setAnswer(null);
     try {
-      const response = await askAiAboutReviewSection(aiConfig, question.trim(), selected);
-      setAnswer(response);
+      const response = await askAiAboutReviewSection(aiConfig, askedQuestion, selected, controller.signal);
+      if (!controller.signal.aborted) setAnswer(response);
     } catch (askRequestError) {
-      setAskError(askRequestError instanceof Error ? askRequestError.message : 'Unable to ask the AI about this section.');
+      if (!controller.signal.aborted) {
+        setAskError(askRequestError instanceof Error ? askRequestError.message : 'Unable to ask the AI about this section.');
+      }
     } finally {
-      setAsking(false);
+      if (sectionAskControllerRef.current === controller) {
+        sectionAskControllerRef.current = null;
+        setAsking(false);
+      }
     }
   };
 
@@ -911,7 +793,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           </section> : <>
           <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.035]" open>
             <summary className="flex cursor-pointer list-none items-start justify-between gap-4 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-300">Merge request</p><h1 className="mt-1 text-lg font-semibold tracking-tight text-slate-950 dark:text-white">{workspace.mergeRequest.title}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{workspace.mergeRequest.author} · <code>{workspace.mergeRequest.sourceBranch}</code> → <code>{workspace.mergeRequest.targetBranch}</code></p></div><ChevronDown className="mt-1 h-5 w-5 text-slate-400 transition-transform group-open:rotate-180" /></summary>
-            <div className="border-t border-slate-100 px-5 py-4 text-sm leading-6 text-slate-600 dark:border-white/10 dark:text-slate-300"><p>{workspace.review.overview.purpose}</p><dl className="mt-4 grid gap-3 sm:grid-cols-2"><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Scope</dt><dd className="mt-1">{workspace.review.overview.scope}</dd></div><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Attention</dt><dd className="mt-1">{workspace.review.overview.riskSummary}</dd></div></dl>{workspace.truncated && <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">Large diffs were clipped in this saved review so it remains focused and browser-safe.</p>}{workspace.delta.state === 'updated' && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs leading-5 text-violet-900 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-100"><strong>New commits since your last review</strong><ul className="mt-1 list-disc space-y-0.5 pl-4">{workspace.delta.summary.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>
+            <div className="border-t border-slate-100 px-5 py-4 text-sm leading-6 text-slate-600 dark:border-white/10 dark:text-slate-300"><p>{workspace.review.overview.purpose}</p><dl className="mt-4 grid gap-3 sm:grid-cols-2"><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Scope</dt><dd className="mt-1">{workspace.review.overview.scope}</dd></div><div><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Attention</dt><dd className="mt-1">{workspace.review.overview.riskSummary}</dd></div></dl>{workspace.truncated && <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100"><strong>GitLab did not return a complete diff.</strong> {workspace.diffCompleteness?.reason ?? 'One or more files could not be loaded.'} Approval remains available, but review the omitted files in GitLab before making your decision.</p>}{workspace.delta.state === 'updated' && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs leading-5 text-violet-900 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-100"><strong>New commits since your last review</strong><ul className="mt-1 list-disc space-y-0.5 pl-4">{workspace.delta.summary.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>
           </details>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
@@ -922,15 +804,69 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
           </section>
 
           <section className="space-y-3" aria-label="Changed code">
-            {selected.files.map((file) => <DiffFile key={file.path} file={file} threads={normalizedThreads.filter((thread) => thread.inline && (thread.filePath === file.path || thread.filePath === file.oldPath))} rangeMode={rangeMode} rangeStart={rangeStart} draft={commentDraft} commentText={commentText} commentError={commentError} commentSaving={commentSaving} replyThreadId={replyThreadId} replyText={replyText} replyError={replyError} replySaving={replySaving} commentsEnabled={commentsEnabled} onLineAction={(line, shiftKey) => handleLineAction(file, line, shiftKey)} onToggleRange={toggleRangeMode} onCommentTextChange={setCommentText} onSubmitComment={submitComment} onCancelComment={cancelCommentDraft} onStartReply={startReply} onReplyTextChange={setReplyText} onSubmitReply={submitReply} onCancelReply={cancelReply} />)}
+            {selected.files.map((file) => <DiffFile
+              key={file.path}
+              file={file}
+              threads={normalizedThreads.filter((thread) => thread.inline && (thread.filePath === file.path || thread.filePath === file.oldPath))}
+              rangeMode={rangeMode}
+              rangeStart={rangeStart}
+              draft={commentDraft}
+              commentText={commentText}
+              commentError={commentError}
+              commentSaving={commentSaving}
+              commentAi={{
+                available: Boolean(aiConfig),
+                asking: commentAsking,
+                result: commentAiResult,
+                error: commentAiError,
+                onAsk: () => void askAboutCommentDraft(),
+                onConfigure: onOpenAiSettings,
+                onDismiss: dismissCommentAi
+              }}
+              replyThreadId={replyThreadId}
+              replyText={replyText}
+              replyError={replyError}
+              replySaving={replySaving}
+              commentsEnabled={commentsEnabled}
+              onLineAction={(line, shiftKey) => handleLineAction(file, line, shiftKey)}
+              onToggleRange={toggleRangeMode}
+              onCommentTextChange={setCommentText}
+              onSubmitComment={submitComment}
+              onCancelComment={cancelCommentDraft}
+              onStartReply={startReply}
+              onReplyTextChange={setReplyText}
+              onSubmitReply={submitReply}
+              onCancelReply={cancelReply}
+            />)}
           </section>
           </>}
         </main>
 
         {!isApprovalStep && <aside className="space-y-4 lg:sticky lg:top-[4.75rem] lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]">
-            <div className="flex items-center justify-between gap-3"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Ask about this code</h2>{aiConfig && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300"><Sparkles className="h-3 w-3" />AI</span>}</div>
-            {aiConfig ? <><form onSubmit={askQuestion} className="mt-3 flex gap-2"><input ref={questionRef} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What calls this? Is failure covered?" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><button type="submit" disabled={asking || !question.trim()} className="inline-flex w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" aria-label="Ask AI">{asking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button></form><div className="mt-3 space-y-1">{selected.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setQuestion(prompt); questionRef.current?.focus(); }} className="block w-full rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white">{prompt}</button>)}</div>{(answer || askError) && <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.04]"><div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{askError ? 'Could not answer' : 'Evidence-led answer'}</span><button type="button" onClick={() => { setAnswer(null); setAskError(null); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Dismiss answer"><X className="h-4 w-4" /></button></div>{askError ? <p className="text-rose-700 dark:text-rose-200">{askError}</p> : <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{answer}</p>}<p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Based only on the changed files shown in this concept.</p></div>}</> : <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 dark:border-white/15 dark:bg-white/[0.04]"><div className="flex gap-2"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><div><p className="text-sm font-medium text-slate-700 dark:text-slate-200">AI is optional</p><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Local semantic grouping is active. Add your own provider to ask questions about this changed code.</p><button type="button" onClick={onOpenAiSettings} className="mt-2 text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300">Add AI settings</button></div></div></div>}
+            <div className="flex items-center justify-between gap-3"><div><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Ask about this code</h2><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Questions here use every changed file in this concept.</p></div>{aiConfig && <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300"><Sparkles className="h-3 w-3" />AI</span>}</div>
+            {aiConfig ? <>
+              <form onSubmit={askQuestion} className="mt-3">
+                <textarea
+                  ref={questionRef}
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  rows={4}
+                  placeholder="Ask for an explanation, trace a failure path, or check an assumption…"
+                  className="min-h-28 w-full resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20"
+                  aria-label="Question about this code"
+                />
+                <div className="mt-2 flex items-center justify-between gap-3"><span className="text-[11px] leading-4 text-slate-400">⌘/Ctrl + Enter to ask</span><button type="submit" disabled={asking || !question.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{asking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}{asking ? 'Asking…' : 'Ask AI'}</button></div>
+              </form>
+              {selected.prompts.length > 0 && <div className="mt-4"><p className="px-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Suggested questions</p><div className="mt-1 space-y-1">{selected.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setQuestion(prompt); questionRef.current?.focus(); }} className="block w-full rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white">{prompt}</button>)}</div></div>}
+              {(answer || askError) && <div className={`mt-3 rounded-xl border p-3 text-sm leading-6 ${askError ? 'border-rose-200 bg-rose-50 dark:border-rose-500/25 dark:bg-rose-500/10' : 'border-indigo-200 bg-indigo-50 dark:border-indigo-500/25 dark:bg-indigo-500/10'}`} role={askError ? 'alert' : 'status'}><div className="mb-2 flex items-center justify-between gap-2"><span className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] ${askError ? 'text-rose-700 dark:text-rose-200' : 'text-indigo-700 dark:text-indigo-200'}`}><Sparkles className="h-3.5 w-3.5" />{askError ? 'Could not answer' : 'AI response'}</span><button type="button" onClick={() => { setAnswer(null); setAskError(null); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Dismiss answer"><X className="h-4 w-4" /></button></div>{askError ? <p className="text-rose-700 dark:text-rose-200">{askError}</p> : <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{answer}</p>}<p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Based only on the changed files shown in this concept.</p></div>}
+            </> : <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 dark:border-white/15 dark:bg-white/[0.04]"><div className="flex gap-2"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><div><p className="text-sm font-medium text-slate-700 dark:text-slate-200">AI is optional</p><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Local semantic grouping is active. Add your own provider to ask questions about this changed code.</p><button type="button" onClick={onOpenAiSettings} className="mt-2 text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300">Add AI settings</button></div></div></div>}
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.035]"><h2 className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Private note</h2><textarea value={session.state.notes[selected.id] ?? ''} onChange={(event) => setNote(event.target.value)} placeholder="Anything you still need to verify…" rows={5} className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" /><p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Saved only in this browser. Never sent to GitLab.</p></section>
@@ -943,7 +879,7 @@ export default function SemanticReviewWorkspace({ service, mergeRequest, aiConfi
 
       {!isApprovalStep && <footer className="sticky bottom-0 z-20 border-t border-slate-200 bg-[#f7f7f5]/95 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-[#10131b]/95 sm:px-6"><div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${statusMeta[selectedStatus].dot}`} />{selected.files.length} {selected.files.length === 1 ? 'file' : 'files'} in view</span><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStatus(selected.id, 'needs-look')} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 dark:border-amber-500/25 dark:bg-white/[0.04] dark:text-amber-100 dark:hover:bg-amber-500/10"><Flag className="h-3.5 w-3.5" />Flag <kbd className="hidden rounded bg-amber-100 px-1 font-mono text-[10px] sm:inline dark:bg-amber-500/15">F</kbd></button><button type="button" onClick={() => setStatus(selected.id, 'blocked')} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-800 hover:bg-rose-50 dark:border-rose-500/25 dark:bg-white/[0.04] dark:text-rose-100 dark:hover:bg-rose-500/10"><AlertTriangle className="h-3.5 w-3.5" />Block <kbd className="hidden rounded bg-rose-100 px-1 font-mono text-[10px] sm:inline dark:bg-rose-500/15">B</kbd></button><button type="button" onClick={moveNext} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"><Check className="h-3.5 w-3.5" />{selectedIndex === sections.length - 1 ? 'Mark reviewed' : 'Reviewed, next'} <kbd className="hidden rounded bg-white/15 px-1 font-mono text-[10px] sm:inline">R</kbd></button></div></div></footer>}
 
-      {showShortcuts && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"><div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-[#f7f7f5] p-5 shadow-2xl dark:border-white/10 dark:bg-[#10131b]"><div className="flex items-center justify-between"><h2 className="font-semibold">Keyboard shortcuts</h2><button type="button" onClick={() => setShowShortcuts(false)} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Close shortcuts"><X className="h-5 w-5" /></button></div><dl className="mt-4 grid grid-cols-[3rem_1fr] gap-y-3 text-sm text-slate-600 dark:text-slate-300"><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">J/K</kbd></dt><dd>Next / previous concept</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">R</kbd></dt><dd>Mark reviewed and move on</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">F/B</kbd></dt><dd>Flag / mark blocking</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">/</kbd></dt><dd>Ask AI about selected code</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">?</kbd></dt><dd>Toggle this guide</dd></dl></div></div>}
+      {showShortcuts && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"><div ref={shortcutsDialogRef} tabIndex={-1} className="w-full max-w-sm rounded-2xl border border-slate-200 bg-[#f7f7f5] p-5 shadow-2xl outline-none dark:border-white/10 dark:bg-[#10131b]"><div className="flex items-center justify-between"><h2 className="font-semibold">Keyboard shortcuts</h2><button type="button" onClick={() => setShowShortcuts(false)} className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Close shortcuts"><X className="h-5 w-5" /></button></div><dl className="mt-4 grid grid-cols-[3rem_1fr] gap-y-3 text-sm text-slate-600 dark:text-slate-300"><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">J/K</kbd></dt><dd>Next / previous concept</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">R</kbd></dt><dd>Mark reviewed and move on</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">F/B</kbd></dt><dd>Flag / mark blocking</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">/</kbd></dt><dd>Ask AI about selected code</dd><dt><kbd className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">?</kbd></dt><dd>Toggle this guide</dd></dl></div></div>}
     </div>
   );
 }

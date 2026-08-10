@@ -1,9 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { RefreshCcw } from 'lucide-react';
-
-const AUTO_REFRESH_POPOVER_DELAY_MS = 3_000;
+import { useState } from 'react';
+import { ChevronDown, RefreshCcw } from 'lucide-react';
 
 interface AutoRefreshControlProps {
   loading: boolean;
@@ -21,46 +19,27 @@ export default function AutoRefreshControl({
   className
 }: AutoRefreshControlProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const openTimerRef = useRef<number | null>(null);
-
-  const clearOpenTimer = () => {
-    if (openTimerRef.current !== null) {
-      window.clearTimeout(openTimerRef.current);
-      openTimerRef.current = null;
-    }
-  };
-
-  const schedulePopoverOpen = () => {
-    clearOpenTimer();
-    openTimerRef.current = window.setTimeout(() => {
-      setIsPopoverOpen(true);
-      openTimerRef.current = null;
-    }, AUTO_REFRESH_POPOVER_DELAY_MS);
-  };
-
-  const closePopover = () => {
-    clearOpenTimer();
-    setIsPopoverOpen(false);
-  };
-
-  useEffect(() => clearOpenTimer, []);
 
   return (
     <div
-      className="relative"
-      onMouseEnter={schedulePopoverOpen}
-      onMouseLeave={closePopover}
-      onFocus={() => {
-        clearOpenTimer();
-        setIsPopoverOpen(true);
-      }}
+      className="relative flex items-center gap-1"
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) closePopover();
+        if (!event.currentTarget.contains(event.relatedTarget)) setIsPopoverOpen(false);
       }}
     >
       <button type="button" onClick={onRefresh} disabled={loading} className={className}>
         <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         {loading ? 'Refreshing...' : 'Refresh'}
+      </button>
+      <button
+        type="button"
+        onClick={() => setIsPopoverOpen((open) => !open)}
+        aria-expanded={isPopoverOpen}
+        aria-haspopup="true"
+        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-2.5 text-xs font-semibold text-gray-600 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700"
+      >
+        Auto {autoRefreshEnabled ? 'on' : 'off'}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isPopoverOpen ? 'rotate-180' : ''}`} />
       </button>
       {isPopoverOpen && (
         <label className="absolute right-0 top-full z-40 mt-1 flex w-52 items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 shadow-lg dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200">

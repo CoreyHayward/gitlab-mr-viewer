@@ -18,6 +18,8 @@ import {
   updateURL,
   type GuidedReviewLocation
 } from '@/utils/urlState';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useMergeRequestResults } from '@/hooks/useMergeRequestResults';
 
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const AUTO_REFRESH_ENABLED_KEY = 'gitlab-mr-viewer-auto-refresh-enabled';
@@ -50,11 +52,10 @@ const applyQuickFilter = (
 export default function HomeContent() {
   const [service, setService] = useState<GitLabService | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<GitLabProject[]>([]);
-  const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequest[]>([]);
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
   const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  const [projectResolutionWarnings, setProjectResolutionWarnings] = useState<string[]>([]);
   const [initialProjectIds, setInitialProjectIds] = useState<number[] | null>(null);
   const [quickFilter, setQuickFilter] = useState<LegacyQuickFilter | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
@@ -63,14 +64,30 @@ export default function HomeContent() {
   const [isConnectionSettingsOpen, setIsConnectionSettingsOpen] = useState(false);
   const [reviewingMergeRequest, setReviewingMergeRequest] = useState<GitLabMergeRequest | null>(null);
   const [guidedReviewLocation, setGuidedReviewLocation] = useState<GuidedReviewLocation | null>(null);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
 
-  const requestControllerRef = useRef<AbortController | null>(null);
   const reviewLookupControllerRef = useRef<AbortController | null>(null);
   const reviewLookupKeyRef = useRef<string | null>(null);
+  const debouncedFilters = useDebouncedValue(filters, 300);
   const effectiveFilters = useMemo(
-    () => applyQuickFilter(filters, quickFilter, currentUser),
-    [currentUser, filters, quickFilter]
+    () => applyQuickFilter(debouncedFilters, quickFilter, currentUser),
+    [currentUser, debouncedFilters, quickFilter]
   );
+  const {
+    mergeRequests,
+    loading,
+    loadingMore,
+    error: loadError,
+    warnings: loadWarnings,
+    hasMore,
+    load: loadMergeRequests,
+    reset: resetMergeRequestResults
+  } = useMergeRequestResults({
+    service,
+    selectedProjects,
+    filters: effectiveFilters,
+    enabled: initialProjectIds !== null && initialProjectIds.length === 0
+  });
 
   const applyURLState = useCallback(() => {
     const { filters: urlFilters, projectIds, guidedReview } = decodeFiltersFromURL(new URLSearchParams(window.location.search));
@@ -80,6 +97,8 @@ export default function HomeContent() {
     if (!projectIds || projectIds.length === 0) setSelectedProjects([]);
     setGuidedReviewLocation(guidedReview);
     setReviewingMergeRequest(null);
+    setProjectResolutionWarnings([]);
+    setNavigationError(null);
   }, []);
 
   useEffect(() => {
@@ -114,10 +133,19 @@ export default function HomeContent() {
     if (!service || initialProjectIds === null || initialProjectIds.length === 0) return;
 
     let active = true;
-    void Promise.all(initialProjectIds.map((projectId) => service.getProject(projectId).catch(() => null)))
-      .then((projects) => {
+    void Promise.all(initialProjectIds.map(async (projectId) => {
+      try {
+        return { projectId, project: await service.getProject(projectId), error: null };
+      } catch (error) {
+        return { projectId, project: null, error };
+      }
+    }))
+      .then((results) => {
         if (!active) return;
-        setSelectedProjects(projects.filter((project): project is GitLabProject => project !== null));
+        setSelectedProjects(results.map(({ project }) => project).filter((project): project is GitLabProject => project !== null));
+        setProjectResolutionWarnings(results.flatMap(({ projectId, error }) => error
+          ? [`Project ${projectId} from the shared URL could not be loaded: ${error instanceof Error ? error.message : 'Unknown error'}`]
+          : []));
         setInitialProjectIds([]);
       });
 
@@ -125,55 +153,6 @@ export default function HomeContent() {
       active = false;
     };
   }, [service, initialProjectIds]);
-
-  const loadMergeRequests = useCallback(async () => {
-    if (!service || initialProjectIds === null || initialProjectIds.length > 0) return;
-
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const results = selectedProjects.length === 0
-        ? await service.getAllMergeRequests(effectiveFilters, controller.signal)
-        : selectedProjects.length === 1
-          ? await service.getMergeRequests(selectedProjects[0].id, effectiveFilters, controller.signal)
-          : await service.getMergeRequestsForProjects(selectedProjects.map((project) => project.id), effectiveFilters, controller.signal);
-
-      if (controller.signal.aborted) return;
-      const [approvals, diffStats] = await Promise.allSettled([
-        service.enrichMergeRequestsWithApprovalStatus(results, controller.signal),
-        service.enrichMergeRequestsWithDiffStats(results, controller.signal)
-      ]);
-      if (controller.signal.aborted) return;
-
-      const approvalsById = approvals.status === 'fulfilled'
-        ? new Map(approvals.value.map((mergeRequest) => [mergeRequest.id, mergeRequest.approval_status]))
-        : new Map<number, GitLabMergeRequest['approval_status']>();
-      const diffStatsById = diffStats.status === 'fulfilled'
-        ? new Map(diffStats.value.map((mergeRequest) => [mergeRequest.id, mergeRequest.diff_stats]))
-        : new Map<number, GitLabMergeRequest['diff_stats']>();
-
-      setMergeRequests(results.map((mergeRequest) => ({
-        ...mergeRequest,
-        approval_status: approvalsById.get(mergeRequest.id) ?? mergeRequest.approval_status,
-        diff_stats: diffStatsById.get(mergeRequest.id) ?? mergeRequest.diff_stats
-      })));
-    } catch (loadError) {
-      if (loadError instanceof Error && loadError.message === 'Request cancelled') return;
-      if (!controller.signal.aborted) {
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load merge requests');
-      }
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
-
-  useEffect(() => {
-    void loadMergeRequests();
-  }, [loadMergeRequests]);
 
   useEffect(() => {
     if (!service || !guidedReviewLocation) {
@@ -183,6 +162,7 @@ export default function HomeContent() {
       setReviewingMergeRequest(null);
       return;
     }
+    setNavigationError(null);
 
     const lookupKey = `${service.getInstanceUrl()}:${guidedReviewLocation.projectId}:${guidedReviewLocation.iid}`;
     const mergeRequest = mergeRequests.find((candidate) => (
@@ -212,7 +192,7 @@ export default function HomeContent() {
       .catch((loadError) => {
         if (!active || controller.signal.aborted) return;
         if (reviewLookupControllerRef.current === controller) reviewLookupKeyRef.current = null;
-        setError(loadError instanceof Error ? loadError.message : 'Unable to open this merge request for guided review.');
+        setNavigationError(loadError instanceof Error ? loadError.message : 'Unable to open this merge request for guided review.');
       })
       .finally(() => {
         if (reviewLookupControllerRef.current === controller) reviewLookupControllerRef.current = null;
@@ -266,10 +246,9 @@ export default function HomeContent() {
     updateURL(effectiveFilters, selectedProjects.map((project) => project.id));
   }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
 
-  useEffect(() => () => requestControllerRef.current?.abort(), []);
-
   const handleProjectsChange = (projects: GitLabProject[]) => {
     setSelectedProjects(projects);
+    setProjectResolutionWarnings([]);
     setInitialProjectIds([]);
   };
 
@@ -313,12 +292,10 @@ export default function HomeContent() {
     }
 
     if (connectionChanged) {
-      requestControllerRef.current?.abort();
-      requestControllerRef.current = null;
+      resetMergeRequestResults();
       setService(configuredService);
-      setMergeRequests([]);
       setCurrentUser(null);
-      setError(null);
+      setNavigationError(null);
 
       if (instanceChanged) {
         setSelectedProjects([]);
@@ -332,7 +309,7 @@ export default function HomeContent() {
     }
 
     setIsConnectionSettingsOpen(false);
-  }, []);
+  }, [resetMergeRequestResults]);
 
   const handleFiltersChange = (nextFilters: FilterOptions) => {
     setQuickFilter(null);
@@ -357,24 +334,22 @@ export default function HomeContent() {
   const handleShareURL = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      window.alert('View URL copied to clipboard.');
+      setShareNotice('View URL copied to the clipboard.');
     } catch {
-      window.prompt('Copy this view URL:', window.location.href);
+      setShareNotice(`Clipboard access is unavailable. Copy this URL: ${window.location.href}`);
     }
   };
 
   const handleDisconnect = () => {
-    requestControllerRef.current?.abort();
-    requestControllerRef.current = null;
+    resetMergeRequestResults();
     setService(null);
     setSelectedProjects([]);
-    setMergeRequests([]);
     setCurrentUser(null);
     setAiConfig(null);
     setIsConnectionSettingsOpen(false);
     setReviewingMergeRequest(null);
     setGuidedReviewLocation(null);
-    setError(null);
+    setNavigationError(null);
     setFilters({ state: 'opened' });
     setInitialProjectIds([]);
     localStorage.removeItem('gitlab-instance-url');
@@ -433,12 +408,18 @@ export default function HomeContent() {
         onFiltersChange={handleFiltersChange}
         mergeRequests={mergeRequests}
         loading={loading}
-        error={error}
+        loadingMore={loadingMore}
+        error={loadError ?? navigationError}
+        warnings={Array.from(new Set([...projectResolutionWarnings, ...loadWarnings]))}
+        hasMore={hasMore}
         currentUser={currentUser}
         quickFilter={quickFilter}
         onQuickFilterToggle={handleQuickFilterToggle}
         onRefresh={handleRefresh}
+        onLoadMore={() => void loadMergeRequests(true)}
         onShare={handleShareURL}
+        shareNotice={shareNotice}
+        onDismissShareNotice={() => setShareNotice(null)}
         onOpenConnectionSettings={() => setIsConnectionSettingsOpen(true)}
         autoRefreshEnabled={autoRefreshEnabled}
         onAutoRefreshEnabledChange={handleAutoRefreshEnabledChange}

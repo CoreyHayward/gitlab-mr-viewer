@@ -56,9 +56,9 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     if (approvalCategory === 'loading' || !approvalStatus) {
       return {
         tone: 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-neutral-900/50 dark:text-gray-300 dark:border-neutral-700',
-        chipLabel: 'Review loading',
-        label: 'Loading review status',
-        detail: 'Fetching approvals from GitLab so approvers are explicit on the card.'
+        chipLabel: 'Review unavailable',
+        label: 'Approval status unavailable',
+        detail: 'GitLab did not return approval details for this merge request. Retry the current view for another attempt.'
       };
     }
 

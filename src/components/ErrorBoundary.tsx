@@ -58,7 +58,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
             <div className="mb-4">
               <p className="text-gray-700 dark:text-gray-300 mb-2">
-                An unexpected error occurred. This has been logged for investigation.
+                An unexpected error occurred. You can retry or inspect the local error details below.
               </p>
               <details className="mt-3">
                 <summary className="cursor-pointer text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200">

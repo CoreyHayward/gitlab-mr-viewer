@@ -14,27 +14,115 @@ import {
   GitLabGroup,
   FilterOptions
 } from '@/types/gitlab';
-import { matchesApprovalFilter } from '@/utils/approvalState';
+import { GitLabApiError, GitLabHttpClient, GitLabRequestCancelledError, mapWithConcurrency } from '@/services/gitlab/http';
+import {
+  applyMergeRequestFilters,
+  buildMergeRequestTargets,
+  mergeRequestSortTimestamp,
+  uniqueStrings,
+  type MergeRequestLoadResult,
+  type MergeRequestPageCursor,
+  type MergeRequestQueryTarget
+} from '@/services/gitlab/mergeRequests';
 
-type GitLabRequestOptions = {
-  method?: 'GET' | 'POST';
-  body?: Record<string, unknown>;
+export type { MergeRequestLoadResult, MergeRequestPageCursor } from '@/services/gitlab/mergeRequests';
+
+const isCancelled = (error: unknown): error is GitLabRequestCancelledError => (
+  error instanceof GitLabRequestCancelledError
+);
+
+const messageFrom = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
+const isTimeout = (error: unknown) => {
+  if (!(error instanceof Error) || !/(?:timed?\s*out|timeout)/i.test(error.message)) return false;
+  return !(error instanceof GitLabApiError) || error.status === 408 || error.status >= 500;
 };
 
-const getMergeRequestSortTimestamp = (mergeRequest: GitLabMergeRequest, filters: FilterOptions) => {
-  if (filters.mergedAfter && mergeRequest.merged_at) {
-    return new Date(mergeRequest.merged_at).getTime();
-  }
+const TIMEOUT_RETRY_PAGE_SIZE = 5;
+const ALL_PROJECTS_BATCH_SIZE = 4;
+const ALL_PROJECT_MERGE_REQUEST_PAGE_SIZE = 5;
+const MAX_GLOBAL_AUTHOR_QUERIES = 20;
+const GLOBAL_AUTHOR_MERGE_REQUEST_PAGE_SIZE = 20;
+const MERGE_REQUEST_DETAILS_BATCH_SIZE = 20;
+const DEFAULT_MERGE_REQUEST_QUERY_CONCURRENCY = 4;
+const AUTHOR_MERGE_REQUEST_QUERY_CONCURRENCY = 8;
+const MEMBER_PROJECTS_ENDPOINT = '/projects?membership=true&simple=true&with_merge_requests_enabled=true&order_by=last_activity_at&sort=desc';
 
-  return new Date(mergeRequest.updated_at).getTime();
+type MergeRequestDetailsNode = {
+  iid: string;
+  approvalsRequired?: number | null;
+  approvalsLeft?: number | null;
+  approvedBy?: {
+    nodes: Array<{
+      id: string;
+      name: string;
+      username: string;
+      avatarUrl?: string | null;
+    }>;
+  } | null;
+  diffStatsSummary?: {
+    additions: number;
+    deletions: number;
+    fileCount: number;
+  } | null;
+};
+
+type MergeRequestDetailsQuery = {
+  project?: {
+    name: string;
+    fullPath: string;
+    webUrl: string;
+    mergeRequests?: {
+      nodes: MergeRequestDetailsNode[];
+    } | null;
+  } | null;
+};
+
+const numericIdFromGlobalId = (id: string) => {
+  const numericId = Number.parseInt(id.match(/\/(\d+)$/)?.[1] ?? '', 10);
+  return Number.isSafeInteger(numericId) && numericId > 0 ? numericId : 0;
+};
+
+type CachedProject = Pick<GitLabProject, 'id' | 'name' | 'path_with_namespace' | 'web_url'>;
+type ProjectCache = Record<number, { project: CachedProject; timestamp: number }>;
+
+const projectFromMergeRequestReference = (mergeRequest: GitLabMergeRequest): CachedProject | null => {
+  const fullReference = mergeRequest.references?.full;
+  const separatorIndex = fullReference?.lastIndexOf('!') ?? -1;
+  const mergeRequestMarker = '/-/merge_requests/';
+  const markerIndex = mergeRequest.web_url.indexOf(mergeRequestMarker);
+  if (!fullReference || separatorIndex <= 0 || markerIndex <= 0) return null;
+
+  const pathWithNamespace = fullReference.slice(0, separatorIndex);
+  const name = pathWithNamespace.split('/').at(-1);
+  if (!name) return null;
+  return {
+    id: mergeRequest.project_id,
+    name,
+    path_with_namespace: pathWithNamespace,
+    web_url: mergeRequest.web_url.slice(0, markerIndex)
+  };
+};
+
+const cachedProjectEntryFrom = (value: unknown): { project: CachedProject; timestamp: number } | null => {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as { project?: unknown; timestamp?: unknown };
+  if (!entry.project || typeof entry.project !== 'object' || typeof entry.timestamp !== 'number' || !Number.isFinite(entry.timestamp)) return null;
+  const project = entry.project as Partial<CachedProject>;
+  if (
+    !Number.isSafeInteger(project.id) || Number(project.id) <= 0 ||
+    typeof project.name !== 'string' ||
+    typeof project.path_with_namespace !== 'string' ||
+    typeof project.web_url !== 'string'
+  ) return null;
+  return { project: project as CachedProject, timestamp: entry.timestamp };
 };
 
 export class GitLabService {
-  private baseUrl: string;
-  private token: string;
+  private readonly http: GitLabHttpClient;
   private currentUser: GitLabUser | null = null;
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
-  private readonly CACHE_KEY = 'gitlab-project-cache';
+  private readonly CACHE_KEY_PREFIX: string;
   private readonly APPROVAL_CACHE_DURATION = 5 * 60 * 1000;
   private readonly APPROVAL_BATCH_SIZE = 8;
   private approvalCache = new Map<string, { status: GitLabMergeRequestApprovalStatus; timestamp: number }>();
@@ -44,156 +132,101 @@ export class GitLabService {
   private readonly ACTIVE_MERGE_TRAIN_STATUSES = new Set(['idle', 'fresh', 'stale']);
 
   constructor(instanceUrl: string, token: string) {
-    this.baseUrl = instanceUrl.endsWith('/') ? instanceUrl.slice(0, -1) : instanceUrl;
-    this.token = token;
+    this.http = new GitLabHttpClient(instanceUrl, token);
+    this.CACHE_KEY_PREFIX = `gitlab-project-cache:${encodeURIComponent(this.http.baseUrl.toLowerCase())}`;
   }
 
   getInstanceUrl(): string {
-    return this.baseUrl;
+    return this.http.baseUrl;
   }
 
-  private async makeRequest<T>(
-    endpoint: string,
-    timeout: number = 30000,
-    externalSignal?: AbortSignal,
-    options: GitLabRequestOptions = {}
-  ): Promise<T> {
-    const url = `${this.baseUrl}/api/v4${endpoint}`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
-    // If an external signal is provided, listen for its abort event
-    const abortHandler = () => controller.abort();
-    if (externalSignal) {
-      if (externalSignal.aborted) {
-        clearTimeout(timeoutId);
-        throw new Error('Request cancelled');
-      }
-      externalSignal.addEventListener('abort', abortHandler);
-    }
-    
-    try {
-      const response = await fetch(url, {
-        method: options.method ?? 'GET',
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        },
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      if (externalSignal) {
-        externalSignal.removeEventListener('abort', abortHandler);
-      }
-
-      if (!response.ok) {
-        throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
-      }
-
-      return response.json();
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (externalSignal) {
-        externalSignal.removeEventListener('abort', abortHandler);
-      }
-      
-      if (error instanceof Error && error.name === 'AbortError') {
-        if (externalSignal?.aborted) {
-          throw new Error('Request cancelled');
-        }
-        throw new Error('Request timed out. Try reducing the scope or filtering your search.');
-      }
-      throw error;
-    }
+  getCurrentUserId(): number | null {
+    return this.currentUser?.id ?? null;
   }
 
-  private async enrichMergeRequestsWithProjects(mergeRequests: GitLabMergeRequest[]): Promise<GitLabMergeRequest[]> {
-    // Get unique project IDs
+  private getProjectCacheKey(): string | null {
+    return this.currentUser ? `${this.CACHE_KEY_PREFIX}:${this.currentUser.id}` : null;
+  }
+
+  private async enrichMergeRequestsWithProjects(
+    mergeRequests: GitLabMergeRequest[],
+    signal?: AbortSignal,
+    warnings: string[] = [],
+    knownProjects: GitLabProject[] = []
+  ): Promise<GitLabMergeRequest[]> {
     const projectIds = [...new Set(mergeRequests.map(mr => mr.project_id))];
-    
-    // Load cache from localStorage
     const cache = this.loadProjectCache();
-    const projectsMap = new Map<number, { id: number; name: string; path_with_namespace: string; web_url: string; }>();
+    const projectsMap = new Map<number, CachedProject>(knownProjects.map((project) => [project.id, {
+      id: project.id,
+      name: project.name,
+      path_with_namespace: project.path_with_namespace,
+      web_url: project.web_url
+    }]));
     const projectsToFetch: number[] = [];
     const now = Date.now();
-    
+
+    projectsMap.forEach((project, projectId) => {
+      cache[projectId] = { project, timestamp: now };
+    });
+
     for (const projectId of projectIds) {
+      if (projectsMap.has(projectId)) continue;
       const cached = cache[projectId];
       if (cached && (now - cached.timestamp) < this.CACHE_DURATION) {
-        // Use cached data
         projectsMap.set(projectId, cached.project);
       } else {
-        // Need to fetch from API
         projectsToFetch.push(projectId);
       }
     }
-    
-    // Fetch ALL uncached projects in parallel (up to 20) with reasonable timeout
-    const projectFetchPromises = projectsToFetch.slice(0, 20).map(async (projectId) => {
-      try {
-        const project = await this.makeRequest<GitLabProject>(`/projects/${projectId}`, 3000);
-        
-        const projectInfo = {
-          id: project.id,
-          name: project.name,
-          path_with_namespace: project.path_with_namespace,
-          web_url: project.web_url
-        };
-        
-        // Store in current session map
-        projectsMap.set(projectId, projectInfo);
-        
-        // Update cache for future use
-        cache[projectId] = {
-          project: projectInfo,
-          timestamp: now
-        };
-        
-        return projectInfo;
-      } catch (error) {
-        console.warn(`Failed to fetch project ${projectId}:`, error);
-        return null;
-      }
+
+    const results = await mapWithConcurrency(projectsToFetch, 6, async (projectId) => {
+      const project = await this.http.request<GitLabProject>(`/projects/${projectId}`, 10_000, signal);
+      return {
+        id: project.id,
+        name: project.name,
+        path_with_namespace: project.path_with_namespace,
+        web_url: project.web_url
+      };
     });
 
-    // Wait for all project fetches to complete (or fail)
-    const results = await Promise.allSettled(projectFetchPromises);
-    
-    // Count successful fetches for logging
-    const successCount = results.filter(r => r.status === 'fulfilled' && r.value !== null).length;
-    if (projectsToFetch.length > 0) {
-      console.log(`Fetched ${successCount}/${Math.min(projectsToFetch.length, 20)} project details from API`);
-    }
-    
-    // Save updated cache to localStorage
+    results.forEach((result, index) => {
+      const projectId = projectsToFetch[index];
+      if (result.status === 'rejected') {
+        if (isCancelled(result.reason)) throw result.reason;
+        warnings.push(`Project ${projectId} details could not be loaded: ${messageFrom(result.reason)}`);
+        return;
+      }
+
+      projectsMap.set(projectId, result.value);
+      cache[projectId] = { project: result.value, timestamp: now };
+    });
+
     this.saveProjectCache(cache);
-    
-    // Enrich merge requests with project information
+
     return mergeRequests.map(mr => ({
       ...mr,
       project: projectsMap.get(mr.project_id)
     }));
   }
 
-  private loadProjectCache(): Record<number, { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; }> {
+  private loadProjectCache(): ProjectCache {
+    const cacheKey = this.getProjectCacheKey();
+    if (!cacheKey || typeof localStorage === 'undefined') return {};
+
     try {
-      const cached = localStorage.getItem(this.CACHE_KEY);
+      const cached = localStorage.getItem(cacheKey);
       if (cached) {
         const cache = JSON.parse(cached);
         // Clean up expired entries
         const now = Date.now();
-        const cleanedCache: Record<number, { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; }> = {};
+        const cleanedCache: ProjectCache = {};
         let removedCount = 0;
         
         for (const [id, entry] of Object.entries(cache)) {
-          const typedEntry = entry as { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; };
-          if (now - typedEntry.timestamp < this.CACHE_DURATION) {
-            cleanedCache[parseInt(id)] = typedEntry;
+          const numericId = Number(id);
+          const typedEntry = cachedProjectEntryFrom(entry);
+          if (Number.isSafeInteger(numericId) && numericId > 0 && typedEntry && typedEntry.project.id === numericId && now - typedEntry.timestamp < this.CACHE_DURATION) {
+            cleanedCache[numericId] = typedEntry;
           } else {
             removedCount++;
           }
@@ -211,9 +244,12 @@ export class GitLabService {
     return {};
   }
 
-  private saveProjectCache(cache: Record<number, { project: { id: number; name: string; path_with_namespace: string; web_url: string; }; timestamp: number; }>): void {
+  private saveProjectCache(cache: ProjectCache): void {
+    const cacheKey = this.getProjectCacheKey();
+    if (!cacheKey || typeof localStorage === 'undefined') return;
+
     try {
-      localStorage.setItem(this.CACHE_KEY, JSON.stringify(cache));
+      localStorage.setItem(cacheKey, JSON.stringify(cache));
     } catch (error) {
       console.warn('Failed to save project cache to localStorage:', error);
     }
@@ -221,8 +257,11 @@ export class GitLabService {
 
   // Method to clear project cache if needed
   clearProjectCache(): void {
+    const cacheKey = this.getProjectCacheKey();
+    if (!cacheKey || typeof localStorage === 'undefined') return;
+
     try {
-      localStorage.removeItem(this.CACHE_KEY);
+      localStorage.removeItem(cacheKey);
     } catch (error) {
       console.warn('Failed to clear project cache:', error);
     }
@@ -234,66 +273,6 @@ export class GitLabService {
 
   clearDiffStatsCache(): void {
     this.diffStatsCache.clear();
-  }
-
-  private async makeGraphQLRequest<T>(
-    query: string,
-    variables: Record<string, unknown>,
-    timeout: number = 10000,
-    externalSignal?: AbortSignal
-  ): Promise<T> {
-    const url = `${this.baseUrl}/api/graphql`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    const abortHandler = () => controller.abort();
-    if (externalSignal) {
-      if (externalSignal.aborted) {
-        clearTimeout(timeoutId);
-        throw new Error('Request cancelled');
-      }
-      externalSignal.addEventListener('abort', abortHandler);
-    }
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ query, variables }),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-      if (externalSignal) {
-        externalSignal.removeEventListener('abort', abortHandler);
-      }
-
-      if (!response.ok) {
-        throw new Error(`GitLab GraphQL error: ${response.status} ${response.statusText}`);
-      }
-
-      const json = await response.json();
-      if (json.errors) {
-        throw new Error(`GitLab GraphQL error: ${JSON.stringify(json.errors)}`);
-      }
-      return json.data as T;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (externalSignal) {
-        externalSignal.removeEventListener('abort', abortHandler);
-      }
-
-      if (error instanceof Error && error.name === 'AbortError') {
-        if (externalSignal?.aborted) {
-          throw new Error('Request cancelled');
-        }
-        throw new Error('GraphQL request timed out');
-      }
-      throw error;
-    }
   }
 
   private getDiffStatsCacheKey(projectId: number, mergeRequestIid: number): string {
@@ -333,7 +312,7 @@ export class GitLabService {
       }
     }`;
 
-    const data = await this.makeGraphQLRequest<{
+    const data = await this.http.graphQL<{
       project?: {
         mergeRequests?: {
           nodes: Array<{
@@ -357,10 +336,166 @@ export class GitLabService {
     return result;
   }
 
+  async enrichMergeRequestsWithDetails(
+    mergeRequests: GitLabMergeRequest[],
+    signal?: AbortSignal,
+    bypassCache: boolean = false,
+    warnings: string[] = []
+  ): Promise<GitLabMergeRequest[]> {
+    const query = `query MergeRequestDetails($fullPath: ID!, $iids: [String!]!, $first: Int!) {
+      project(fullPath: $fullPath) {
+        name
+        fullPath
+        webUrl
+        mergeRequests(iids: $iids, first: $first) {
+          nodes {
+            iid
+            approvalsRequired
+            approvalsLeft
+            approvedBy {
+              nodes {
+                id
+                name
+                username
+                avatarUrl
+              }
+            }
+            diffStatsSummary {
+              additions
+              deletions
+              fileCount
+            }
+          }
+        }
+      }
+    }`;
+    const groups = new Map<string, GitLabMergeRequest[]>();
+    const projectCache = this.loadProjectCache();
+    const projectsById = new Map<number, CachedProject>(
+      Array.from(new Set(mergeRequests.map(({ project_id }) => project_id)))
+        .flatMap((projectId) => projectCache[projectId]
+          ? [[projectId, projectCache[projectId].project] as const]
+          : [])
+    );
+    const refreshedProjectsById = new Map<number, CachedProject>();
+
+    for (const mergeRequest of mergeRequests) {
+      const fullPath = mergeRequest.project?.path_with_namespace;
+      if (!fullPath) continue;
+      const hasApproval = mergeRequest.state !== 'opened' || (
+        !bypassCache && this.getCachedApprovalStatus(mergeRequest.project_id, mergeRequest.iid) !== null
+      );
+      const hasDiffStats = !bypassCache && this.getCachedDiffStats(mergeRequest.project_id, mergeRequest.iid) !== null;
+      if (hasApproval && hasDiffStats) continue;
+
+      const projectMergeRequests = groups.get(fullPath) ?? [];
+      projectMergeRequests.push(mergeRequest);
+      groups.set(fullPath, projectMergeRequests);
+    }
+
+    const detailTargets = Array.from(groups.entries()).flatMap(([fullPath, projectMergeRequests]) => (
+      Array.from({ length: Math.ceil(projectMergeRequests.length / MERGE_REQUEST_DETAILS_BATCH_SIZE) }, (_, index) => [
+        fullPath,
+        projectMergeRequests.slice(
+          index * MERGE_REQUEST_DETAILS_BATCH_SIZE,
+          (index + 1) * MERGE_REQUEST_DETAILS_BATCH_SIZE
+        )
+      ] as const)
+    ));
+    const results = await mapWithConcurrency(detailTargets, this.DIFF_STATS_PROJECT_BATCH_SIZE, async ([fullPath, projectMergeRequests]) => {
+      const data = await this.http.graphQL<MergeRequestDetailsQuery>(
+        query,
+        {
+          fullPath,
+          iids: projectMergeRequests.map(({ iid }) => String(iid)),
+          first: projectMergeRequests.length
+        },
+        10_000,
+        signal
+      );
+      const project = data.project;
+      const nodes = project?.mergeRequests?.nodes;
+      if (!nodes) throw new Error(`GitLab returned no merge request details for ${fullPath}.`);
+      const projectId = projectMergeRequests[0]?.project_id;
+      if (projectId) {
+        const refreshedProject = {
+          id: projectId,
+          name: project.name,
+          path_with_namespace: project.fullPath,
+          web_url: project.webUrl
+        };
+        projectsById.set(projectId, refreshedProject);
+        refreshedProjectsById.set(projectId, refreshedProject);
+      }
+
+      const mergeRequestsByIid = new Map(projectMergeRequests.map((mergeRequest) => [mergeRequest.iid, mergeRequest]));
+      for (const node of nodes) {
+        const mergeRequest = mergeRequestsByIid.get(Number(node.iid));
+        if (!mergeRequest) continue;
+
+        if (
+          mergeRequest.state === 'opened' &&
+          typeof node.approvalsRequired === 'number' &&
+          typeof node.approvalsLeft === 'number'
+        ) {
+          this.approvalCache.set(this.getApprovalCacheKey(mergeRequest.project_id, mergeRequest.iid), {
+            status: {
+              approvals_required: node.approvalsRequired,
+              approvals_left: node.approvalsLeft,
+              approved_by: (node.approvedBy?.nodes ?? []).map((user) => ({
+                approved_at: null,
+                user: {
+                  id: numericIdFromGlobalId(user.id),
+                  name: user.name,
+                  username: user.username,
+                  avatar_url: user.avatarUrl ?? null
+                }
+              }))
+            },
+            timestamp: Date.now()
+          });
+        }
+
+        if (node.diffStatsSummary) {
+          this.diffStatsCache.set(this.getDiffStatsCacheKey(mergeRequest.project_id, mergeRequest.iid), {
+            stats: {
+              additions: node.diffStatsSummary.additions,
+              deletions: node.diffStatsSummary.deletions,
+              file_count: node.diffStatsSummary.fileCount
+            },
+            timestamp: Date.now()
+          });
+        }
+      }
+    });
+
+    results.forEach((result) => {
+      if (result.status === 'fulfilled') return;
+      if (isCancelled(result.reason)) throw result.reason;
+      warnings.push(`Merge request details could not be loaded: ${messageFrom(result.reason)}`);
+    });
+
+    if (refreshedProjectsById.size > 0) {
+      const timestamp = Date.now();
+      refreshedProjectsById.forEach((project, projectId) => {
+        projectCache[projectId] = { project, timestamp };
+      });
+      this.saveProjectCache(projectCache);
+    }
+
+    return mergeRequests.map((mergeRequest) => ({
+      ...mergeRequest,
+      project: projectsById.get(mergeRequest.project_id) ?? mergeRequest.project,
+      approval_status: this.getCachedApprovalStatus(mergeRequest.project_id, mergeRequest.iid) ?? mergeRequest.approval_status,
+      diff_stats: this.getCachedDiffStats(mergeRequest.project_id, mergeRequest.iid) ?? mergeRequest.diff_stats
+    }));
+  }
+
   async enrichMergeRequestsWithDiffStats(
     mergeRequests: GitLabMergeRequest[],
     signal?: AbortSignal,
-    bypassCache: boolean = false
+    bypassCache: boolean = false,
+    warnings: string[] = []
   ): Promise<GitLabMergeRequest[]> {
     const groups = new Map<string, GitLabMergeRequest[]>();
     for (const mr of mergeRequests) {
@@ -376,7 +511,7 @@ export class GitLabService {
     const projectEntries = Array.from(groups.entries());
     for (let i = 0; i < projectEntries.length; i += this.DIFF_STATS_PROJECT_BATCH_SIZE) {
       if (signal?.aborted) {
-        throw new Error('Request cancelled');
+        throw new GitLabRequestCancelledError();
       }
       const slice = projectEntries.slice(i, i + this.DIFF_STATS_PROJECT_BATCH_SIZE);
       const results = await Promise.allSettled(
@@ -396,10 +531,8 @@ export class GitLabService {
 
       results.forEach((result) => {
         if (result.status === 'rejected') {
-          if (result.reason instanceof Error && result.reason.message === 'Request cancelled') {
-            return;
-          }
-          console.warn('Failed to load merge request diff stats:', result.reason);
+          if (isCancelled(result.reason)) throw result.reason;
+          warnings.push(`Diff statistics could not be loaded: ${messageFrom(result.reason)}`);
         }
       });
     }
@@ -433,15 +566,15 @@ export class GitLabService {
   }
 
   async getProjects(search?: string, signal?: AbortSignal): Promise<GitLabProject[]> {
-    let endpoint = '/projects?membership=true&simple=true&per_page=100';
+    let endpoint = '/projects?membership=true&simple=true&order_by=last_activity_at&sort=desc';
     if (search) {
       endpoint += `&search=${encodeURIComponent(search)}`;
     }
-    return this.makeRequest<GitLabProject[]>(endpoint, 30000, signal);
+    return this.http.requestAllPages<GitLabProject>(endpoint, 30_000, signal);
   }
 
   async getProject(projectId: number, signal?: AbortSignal): Promise<GitLabProject> {
-    return this.makeRequest<GitLabProject>(`/projects/${projectId}`, 30000, signal);
+    return this.http.request<GitLabProject>(`/projects/${projectId}`, 30000, signal);
   }
 
   async getMergeRequestReviewDetails(
@@ -449,11 +582,63 @@ export class GitLabService {
     mergeRequestIid: number,
     signal?: AbortSignal
   ): Promise<GitLabMergeRequestReviewDetails> {
-    return this.makeRequest<GitLabMergeRequestReviewDetails>(
-      `/projects/${projectId}/merge_requests/${mergeRequestIid}/changes?unidiff=true`,
+    const metadata = await this.http.request<GitLabMergeRequestReviewDetails & { changes_count?: string | null }>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}`,
       30000,
       signal
     );
+    const changes = [] as NonNullable<GitLabMergeRequestReviewDetails['changes']>;
+    let page = 1;
+    let paginationTruncated = false;
+
+    while (page <= 100) {
+      const result = await this.http.requestPage<NonNullable<GitLabMergeRequestReviewDetails['changes']>[number]>(
+        `/projects/${projectId}/merge_requests/${mergeRequestIid}/diffs?unidiff=true`,
+        page,
+        100,
+        30_000,
+        signal
+      );
+      changes.push(...result.items);
+      if (result.nextPage === null) break;
+      if (page === 100) {
+        paginationTruncated = true;
+        break;
+      }
+      page = result.nextPage;
+    }
+
+    const collapsedFiles = changes.filter((change) => change.collapsed).length;
+    const tooLargeFiles = changes.filter((change) => change.too_large).length;
+    const generatedFiles = changes.filter((change) => change.generated_file).length;
+    const rawChangesCount = metadata.changes_count?.trim() ?? '';
+    const countCapped = rawChangesCount.endsWith('+');
+    const parsedTotal = Number.parseInt(rawChangesCount, 10);
+    const totalFiles = Number.isSafeInteger(parsedTotal) ? parsedTotal : undefined;
+    const countTruncated = totalFiles !== undefined && changes.length < totalFiles;
+    const truncated = paginationTruncated || countCapped || countTruncated || collapsedFiles > 0 || tooLargeFiles > 0;
+    const reasons = [
+      paginationTruncated ? 'The merge request has more than 10,000 changed files.' : null,
+      countCapped ? `GitLab capped the reported change count at ${totalFiles?.toLocaleString('en-US') ?? 'its display limit'}; the actual total may be higher.` : null,
+      countTruncated ? `GitLab reported ${totalFiles} changed files but returned ${changes.length}.` : null,
+      collapsedFiles > 0 ? `${collapsedFiles} file${collapsedFiles === 1 ? '' : 's'} were collapsed by GitLab.` : null,
+      tooLargeFiles > 0 ? `${tooLargeFiles} file${tooLargeFiles === 1 ? '' : 's'} were too large for GitLab to return.` : null
+    ].filter((reason): reason is string => reason !== null);
+
+    return {
+      ...metadata,
+      changes,
+      diff_completeness: {
+        complete: !truncated,
+        truncated,
+        ...(totalFiles === undefined ? {} : { total_files: totalFiles }),
+        loaded_files: changes.length,
+        collapsed_files: collapsedFiles,
+        too_large_files: tooLargeFiles,
+        generated_files: generatedFiles,
+        ...(reasons.length > 0 ? { reason: reasons.join(' ') } : {})
+      }
+    };
   }
 
   async getMergeRequest(
@@ -461,12 +646,12 @@ export class GitLabService {
     mergeRequestIid: number,
     signal?: AbortSignal
   ): Promise<GitLabMergeRequest> {
-    const mergeRequest = await this.makeRequest<GitLabMergeRequest>(
+    const mergeRequest = await this.http.request<GitLabMergeRequest>(
       `/projects/${projectId}/merge_requests/${mergeRequestIid}`,
       30000,
       signal
     );
-    const [enrichedMergeRequest] = await this.enrichMergeRequestsWithProjects([mergeRequest]);
+    const [enrichedMergeRequest] = await this.enrichMergeRequestsWithProjects([mergeRequest], signal);
     return enrichedMergeRequest ?? mergeRequest;
   }
 
@@ -475,18 +660,11 @@ export class GitLabService {
     mergeRequestIid: number,
     signal?: AbortSignal
   ): Promise<GitLabMergeRequestDiscussion[]> {
-    const discussions: GitLabMergeRequestDiscussion[] = [];
-    const pageSize = 100;
-    for (let page = 1; page <= 100; page += 1) {
-      const batch = await this.makeRequest<GitLabMergeRequestDiscussion[]>(
-        `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions?per_page=${pageSize}&page=${page}`,
-        30000,
-        signal
-      );
-      discussions.push(...batch);
-      if (batch.length < pageSize) break;
-    }
-    return discussions;
+    return this.http.requestAllPages<GitLabMergeRequestDiscussion>(
+      `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions`,
+      30_000,
+      signal
+    );
   }
 
   async createMergeRequestDiscussion(
@@ -496,7 +674,7 @@ export class GitLabService {
     position?: GitLabDiscussionPosition,
     signal?: AbortSignal
   ): Promise<GitLabMergeRequestDiscussion> {
-    return this.makeRequest<GitLabMergeRequestDiscussion>(
+    return this.http.request<GitLabMergeRequestDiscussion>(
       `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions`,
       30000,
       signal,
@@ -517,7 +695,7 @@ export class GitLabService {
     body: string,
     signal?: AbortSignal
   ): Promise<GitLabDiscussionNote> {
-    return this.makeRequest<GitLabDiscussionNote>(
+    return this.http.request<GitLabDiscussionNote>(
       `/projects/${projectId}/merge_requests/${mergeRequestIid}/discussions/${encodeURIComponent(discussionId)}/notes`,
       30000,
       signal,
@@ -534,7 +712,7 @@ export class GitLabService {
     headSha?: string
   ): Promise<GitLabMergeRequestApprovalStatus> {
     const sha = headSha && /^[a-f0-9]{7,80}$/i.test(headSha) ? headSha : undefined;
-    await this.makeRequest<GitLabMergeRequest>(
+    await this.http.request<GitLabMergeRequest>(
       `/projects/${projectId}/merge_requests/${mergeRequestIid}/approve`,
       10000,
       undefined,
@@ -555,7 +733,7 @@ export class GitLabService {
     signal?: AbortSignal
   ): Promise<GitLabCommitComparison> {
     const params = new URLSearchParams({ from, to, straight: 'true' });
-    return this.makeRequest<GitLabCommitComparison>(
+    return this.http.request<GitLabCommitComparison>(
       `/projects/${projectId}/repository/compare?${params.toString()}`,
       15000,
       signal
@@ -563,8 +741,8 @@ export class GitLabService {
   }
 
   async getActiveMergeTrains(projectId: number, signal?: AbortSignal): Promise<GitLabMergeTrain[]> {
-    const trains = await this.makeRequest<GitLabMergeTrain[]>(
-      `/projects/${projectId}/merge_trains?scope=active&sort=asc&per_page=100`,
+    const trains = await this.http.requestAllPages<GitLabMergeTrain>(
+      `/projects/${projectId}/merge_trains?scope=active&sort=asc`,
       10000,
       signal
     );
@@ -585,24 +763,19 @@ export class GitLabService {
       new Map(projects.map((project) => [project.id, project])).values()
     );
 
-    const results = await Promise.all(
-      uniqueProjects.map(async (project) => {
-        try {
-          const trains = await this.getActiveMergeTrains(project.id, signal);
-          return { project, trains };
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Request cancelled') {
-            throw error;
-          }
-
-          return {
-            project,
-            trains: [],
-            error: error instanceof Error ? error.message : 'Failed to load merge train'
-          };
-        }
-      })
-    );
+    const settled = await mapWithConcurrency(uniqueProjects, 4, async (project) => ({
+      project,
+      trains: await this.getActiveMergeTrains(project.id, signal)
+    }));
+    const results = settled.map((result, index): GitLabMergeTrainProjectStatus => {
+      if (result.status === 'fulfilled') return result.value;
+      if (isCancelled(result.reason)) throw result.reason;
+      return {
+        project: uniqueProjects[index],
+        trains: [],
+        error: messageFrom(result.reason)
+      };
+    });
 
     return results.sort((a, b) => {
       if (b.trains.length !== a.trains.length) {
@@ -618,52 +791,13 @@ export class GitLabService {
       return this.currentUser;
     }
 
-    const user = await this.makeRequest<GitLabUser>('/user', 30000, signal);
+    const user = await this.http.request<GitLabUser>('/user', 30000, signal);
     this.currentUser = user;
     return user;
   }
 
   private getApprovalCacheKey(projectId: number, mergeRequestIid: number): string {
     return `${projectId}:${mergeRequestIid}`;
-  }
-
-  private applyClientSideFilters(mergeRequests: GitLabMergeRequest[], filters: FilterOptions): GitLabMergeRequest[] {
-    return mergeRequests.filter((mr) => {
-      if (filters.title && !mr.title.toLowerCase().includes(filters.title.toLowerCase())) {
-        return false;
-      }
-
-      if (filters.excludeTitle && mr.title.toLowerCase().includes(filters.excludeTitle.toLowerCase())) {
-        return false;
-      }
-
-      if (filters.draft !== undefined && mr.draft !== filters.draft) {
-        return false;
-      }
-
-      if (filters.mergedAfter) {
-        if (!mr.merged_at || new Date(mr.merged_at).getTime() < new Date(filters.mergedAfter).getTime()) {
-          return false;
-        }
-      }
-
-      if (filters.approvalState && !matchesApprovalFilter(mr.approval_status, filters.approvalState, mr.state)) {
-        return false;
-      }
-
-      if (filters.notReviewedByMe) {
-        if (mr.state !== 'opened' || !mr.approval_status || !this.currentUser) {
-          return false;
-        }
-
-        const approvedByCurrentUser = mr.approval_status.approved_by.some(({ user }) => user.username === this.currentUser?.username);
-        if (approvedByCurrentUser) {
-          return false;
-        }
-      }
-
-      return true;
-    });
   }
 
   private getCachedApprovalStatus(projectId: number, mergeRequestIid: number): GitLabMergeRequestApprovalStatus | null {
@@ -693,7 +827,7 @@ export class GitLabService {
       return cached;
     }
 
-    const approvalStatus = await this.makeRequest<GitLabMergeRequestApprovalStatus>(
+    const approvalStatus = await this.http.request<GitLabMergeRequestApprovalStatus>(
       `/projects/${projectId}/merge_requests/${mergeRequestIid}/approvals`,
       5000,
       signal
@@ -710,7 +844,8 @@ export class GitLabService {
   async enrichMergeRequestsWithApprovalStatus(
     mergeRequests: GitLabMergeRequest[],
     signal?: AbortSignal,
-    bypassCache: boolean = false
+    bypassCache: boolean = false,
+    warnings: string[] = []
   ): Promise<GitLabMergeRequest[]> {
     const approvalTargets = mergeRequests.filter((mergeRequest) => mergeRequest.state === 'opened');
 
@@ -722,7 +857,7 @@ export class GitLabService {
 
     for (let index = 0; index < approvalTargets.length; index += this.APPROVAL_BATCH_SIZE) {
       if (signal?.aborted) {
-        throw new Error('Request cancelled');
+        throw new GitLabRequestCancelledError();
       }
 
       const batch = approvalTargets.slice(index, index + this.APPROVAL_BATCH_SIZE);
@@ -748,11 +883,8 @@ export class GitLabService {
           return;
         }
 
-        if (result.reason instanceof Error && result.reason.message === 'Request cancelled') {
-          return;
-        }
-
-        console.warn('Failed to load merge request approval status:', result.reason);
+        if (isCancelled(result.reason)) throw result.reason;
+        warnings.push(`Approval status could not be loaded: ${messageFrom(result.reason)}`);
       });
     }
 
@@ -770,259 +902,225 @@ export class GitLabService {
     });
   }
 
+  private async loadMergeRequestTargets(
+    targets: MergeRequestQueryTarget[],
+    filters: FilterOptions,
+    signal?: AbortSignal,
+    knownProjects: GitLabProject[] = []
+  ): Promise<MergeRequestLoadResult> {
+    const warnings: string[] = [];
+    const queryConcurrency = uniqueStrings(filters.authors).length > 0
+      ? AUTHOR_MERGE_REQUEST_QUERY_CONCURRENCY
+      : DEFAULT_MERGE_REQUEST_QUERY_CONCURRENCY;
+    const results = await mapWithConcurrency(targets, queryConcurrency, async (target) => {
+      const requestPage = (requestTarget: MergeRequestQueryTarget) => (
+        this.http.requestPage<GitLabMergeRequest>(
+          requestTarget.endpoint,
+          requestTarget.page,
+          requestTarget.perPage,
+          20_000,
+          signal
+        )
+      );
+
+      try {
+        return { target, page: await requestPage(target), error: null };
+      } catch (error) {
+        if (isCancelled(error)) throw error;
+        if (target.page !== 1 || target.perPage <= TIMEOUT_RETRY_PAGE_SIZE || !isTimeout(error)) {
+          return { target, page: null, error };
+        }
+
+        const retryTarget = { ...target, perPage: TIMEOUT_RETRY_PAGE_SIZE };
+        try {
+          return { target: retryTarget, page: await requestPage(retryTarget), error: null };
+        } catch (retryError) {
+          if (isCancelled(retryError)) throw retryError;
+          return { target: retryTarget, page: null, error: retryError };
+        }
+      }
+    });
+    const nextTargets: MergeRequestQueryTarget[] = [];
+    const mergeRequestMap = new Map<number, GitLabMergeRequest>();
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        if (isCancelled(result.reason)) throw result.reason;
+        const target = targets[index];
+        warnings.push(`${target.label} could not be loaded: ${messageFrom(result.reason)}`);
+        nextTargets.push(target);
+        return;
+      }
+
+      const { target, page, error } = result.value;
+      if (error || !page) {
+        warnings.push(`${target.label} could not be loaded: ${messageFrom(error)}`);
+        nextTargets.push(target);
+        return;
+      }
+
+      for (const mergeRequest of page.items) {
+        const existing = mergeRequestMap.get(mergeRequest.id);
+        if (!existing || mergeRequestSortTimestamp(mergeRequest, filters) > mergeRequestSortTimestamp(existing, filters)) {
+          mergeRequestMap.set(mergeRequest.id, mergeRequest);
+        }
+      }
+      if (page.nextPage !== null) {
+        nextTargets.push({ ...target, page: page.nextPage });
+      }
+    });
+
+    let mergeRequests = Array.from(mergeRequestMap.values());
+    if (!this.currentUser) {
+      try {
+        await this.getCurrentUser(signal);
+      } catch (error) {
+        if (isCancelled(error)) throw error;
+        warnings.push(`Your GitLab user could not be loaded: ${messageFrom(error)}`);
+      }
+    }
+    const requiresExactProjectName = (filters.projects?.length ?? 0) > 0;
+    const knownProjectsById = new Map(knownProjects.map((project) => [project.id, project]));
+    const projectsFromReferences = new Map<number, CachedProject>();
+    if (!requiresExactProjectName) {
+      for (const mergeRequest of mergeRequests) {
+        const project = knownProjectsById.get(mergeRequest.project_id) ?? projectFromMergeRequestReference(mergeRequest);
+        if (project) projectsFromReferences.set(mergeRequest.project_id, project);
+      }
+    }
+
+    if (!requiresExactProjectName && mergeRequests.every(({ project_id }) => projectsFromReferences.has(project_id))) {
+      mergeRequests = mergeRequests.map((mergeRequest) => ({
+        ...mergeRequest,
+        project: projectsFromReferences.get(mergeRequest.project_id)
+      }));
+    } else {
+      mergeRequests = await this.enrichMergeRequestsWithProjects(mergeRequests, signal, warnings, knownProjects);
+    }
+
+    if (filters.approvalState || filters.notReviewedByMe) {
+      mergeRequests = await this.enrichMergeRequestsWithDetails(mergeRequests, signal, true, warnings);
+    }
+
+    mergeRequests = applyMergeRequestFilters(mergeRequests, filters, this.currentUser?.username);
+    mergeRequests.sort((a, b) => mergeRequestSortTimestamp(b, filters) - mergeRequestSortTimestamp(a, filters));
+
+    return {
+      mergeRequests,
+      nextCursor: nextTargets.length > 0 ? { targets: nextTargets } : null,
+      warnings: Array.from(new Set(warnings))
+    };
+  }
+
   async getMergeRequests(
     projectId: number,
     filters: FilterOptions = {},
-    signal?: AbortSignal
-  ): Promise<GitLabMergeRequest[]> {
-    const buildParams = (authorUsername?: string): URLSearchParams => {
-      const params = new URLSearchParams();
-      
-      if (filters.state && filters.state !== 'all') {
-        params.append('state', filters.state);
-      }
-      
-      if (authorUsername) {
-        params.append('author_username', authorUsername);
-      }
-      
-      if (filters.dateFrom) {
-        params.append('created_after', filters.dateFrom);
-      }
-      
-      if (filters.dateTo) {
-        params.append('created_before', filters.dateTo);
-      }
-
-      if (filters.mergedAfter) {
-        params.append('updated_after', filters.mergedAfter);
-      }
-
-      params.append('per_page', '100');
-      params.append('order_by', filters.mergedAfter ? 'merged_at' : 'updated_at');
-      params.append('sort', 'desc');
-      
-      return params;
-    };
-
-    let allMergeRequests: GitLabMergeRequest[] = [];
-
-    // If authors specified, make PARALLEL API calls for each author
-    if (filters.authors && filters.authors.length > 0) {
-      const authorPromises = filters.authors.map(async (author) => {
-        const params = buildParams(author);
-        const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
-        
-        try {
-          return await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Request cancelled') {
-            throw error;
-          }
-          console.warn(`Failed to fetch MRs for author ${author}:`, error);
-          return [];
-        }
-      });
-      
-      // Wait for all author requests in parallel
-      const results = await Promise.all(authorPromises);
-      
-      // Flatten and deduplicate using Map (faster than filter+findIndex)
-      const mrMap = new Map<number, GitLabMergeRequest>();
-      for (const authorMRs of results) {
-        for (const mr of authorMRs) {
-          if (!mrMap.has(mr.id)) {
-            mrMap.set(mr.id, mr);
-          }
-        }
-      }
-      
-      allMergeRequests = Array.from(mrMap.values());
-      
-      // Sort once after deduplication
-      allMergeRequests.sort((a, b) => getMergeRequestSortTimestamp(b, filters) - getMergeRequestSortTimestamp(a, filters));
-    } else {
-      // Single API call - already sorted by GitLab
-      const params = buildParams();
-      const endpoint = `/projects/${projectId}/merge_requests?${params.toString()}`;
-      allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, 30000, signal);
-    }
-    
-    // Enrich merge requests with project information
-    allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
-
-    if (filters.approvalState || filters.notReviewedByMe) {
-      if (filters.notReviewedByMe) {
-        await this.getCurrentUser(signal);
-      }
-      allMergeRequests = await this.enrichMergeRequestsWithApprovalStatus(allMergeRequests, signal, true);
-    }
-    
-    return this.applyClientSideFilters(allMergeRequests, filters);
+    signal?: AbortSignal,
+    cursor?: MergeRequestPageCursor | null
+  ): Promise<MergeRequestLoadResult> {
+    const targets = cursor?.targets ?? buildMergeRequestTargets([{
+      endpoint: `/projects/${projectId}/merge_requests`,
+      label: `Project ${projectId}`
+    }], filters);
+    return this.loadMergeRequestTargets(targets, filters, signal);
   }
 
   async getMergeRequestsForProjects(
     projectIds: number[],
     filters: FilterOptions = {},
-    signal?: AbortSignal
-  ): Promise<GitLabMergeRequest[]> {
-    const uniqueProjectIds = [...new Set(projectIds)];
-    const results = await Promise.all(
-      uniqueProjectIds.map(async (projectId) => {
-        try {
-          return await this.getMergeRequests(projectId, filters, signal);
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Request cancelled') {
-            throw error;
-          }
-
-          console.warn(`Failed to fetch merge requests for project ${projectId}:`, error);
-          return [];
-        }
-      })
+    signal?: AbortSignal,
+    cursor?: MergeRequestPageCursor | null
+  ): Promise<MergeRequestLoadResult> {
+    const uniqueProjectIds = Array.from(new Set(projectIds)).filter((id) => Number.isSafeInteger(id) && id > 0);
+    const targets = cursor?.targets ?? buildMergeRequestTargets(
+      uniqueProjectIds.map((projectId) => ({
+        endpoint: `/projects/${projectId}/merge_requests`,
+        label: `Project ${projectId}`
+      })),
+      filters
     );
+    const result = await this.loadMergeRequestTargets(targets, filters, signal);
+    if (uniqueProjectIds.length !== new Set(projectIds).size) {
+      result.warnings.unshift('One or more invalid project IDs were ignored.');
+    }
+    return result;
+  }
 
-    const mergeRequestMap = new Map<number, GitLabMergeRequest>();
-    for (const projectMergeRequests of results) {
-      for (const mergeRequest of projectMergeRequests) {
-        const existing = mergeRequestMap.get(mergeRequest.id);
-        if (!existing || getMergeRequestSortTimestamp(mergeRequest, filters) > getMergeRequestSortTimestamp(existing, filters)) {
-          mergeRequestMap.set(mergeRequest.id, mergeRequest);
-        }
+  async getAllMergeRequests(
+    filters: FilterOptions = {},
+    signal?: AbortSignal,
+    cursor?: MergeRequestPageCursor | null
+  ): Promise<MergeRequestLoadResult> {
+    const authors = uniqueStrings(filters.authors);
+    if (authors.length > 0 && authors.length <= MAX_GLOBAL_AUTHOR_QUERIES) {
+      const targets = cursor?.targets ?? buildMergeRequestTargets([{
+        endpoint: '/merge_requests',
+        label: 'Merge requests across all accessible projects',
+        globalScope: true,
+        perPage: GLOBAL_AUTHOR_MERGE_REQUEST_PAGE_SIZE
+      }], filters);
+      return this.loadMergeRequestTargets(targets, filters, signal);
+    }
+
+    const warnings: string[] = [];
+    const queuedTargets = [...(cursor?.targets ?? [])];
+    let projectDiscovery = cursor?.projectDiscovery ?? (cursor ? undefined : {
+      page: 1,
+      perPage: ALL_PROJECTS_BATCH_SIZE
+    });
+    let discoveredProjects: GitLabProject[] = [];
+
+    if (projectDiscovery) {
+      try {
+        const projectPage = await this.http.requestPage<GitLabProject>(
+          MEMBER_PROJECTS_ENDPOINT,
+          projectDiscovery.page,
+          projectDiscovery.perPage,
+          30_000,
+          signal
+        );
+        discoveredProjects = projectPage.items;
+        queuedTargets.push(...buildMergeRequestTargets(
+          discoveredProjects.map((project) => ({
+            endpoint: `/projects/${project.id}/merge_requests`,
+            label: project.path_with_namespace,
+            perPage: ALL_PROJECT_MERGE_REQUEST_PAGE_SIZE
+          })),
+          filters
+        ));
+        projectDiscovery = projectPage.nextPage === null ? undefined : {
+          ...projectDiscovery,
+          page: projectPage.nextPage
+        };
+      } catch (error) {
+        if (isCancelled(error)) throw error;
+        warnings.push(`Your GitLab projects could not be loaded: ${messageFrom(error)}`);
       }
     }
 
-    return Array.from(mergeRequestMap.values()).sort(
-      (a, b) => getMergeRequestSortTimestamp(b, filters) - getMergeRequestSortTimestamp(a, filters)
-    );
-  }
+    const activeTargets = queuedTargets.slice(0, ALL_PROJECTS_BATCH_SIZE);
+    const deferredTargets = queuedTargets.slice(ALL_PROJECTS_BATCH_SIZE);
+    const result = await this.loadMergeRequestTargets(activeTargets, filters, signal, discoveredProjects);
+    const nextTargets = [
+      ...deferredTargets,
+      ...(result.nextCursor?.targets ?? [])
+    ];
 
-  async getAllMergeRequests(filters: FilterOptions = {}, signal?: AbortSignal): Promise<GitLabMergeRequest[]> {
-    // Determine if we have specific filters early
-    const hasSpecificFilters = filters.state === 'closed' ||
-      filters.state === 'merged' ||
-      filters.state === 'all' ||
-      Boolean(
-        filters.authors?.length ||
-        filters.approvalState ||
-        filters.notReviewedByMe ||
-        filters.title ||
-        filters.excludeTitle ||
-        filters.draft !== undefined ||
-        filters.dateFrom ||
-        filters.dateTo ||
-        filters.mergedAfter ||
-        filters.projects?.length
-      );
-    
-    const buildParams = (authorUsername?: string): URLSearchParams => {
-      const params = new URLSearchParams();
-      
-      if (filters.state && filters.state !== 'all') {
-        params.append('state', filters.state);
-      }
-      
-      if (authorUsername) {
-        params.append('author_username', authorUsername);
-      }
-      
-      if (filters.dateFrom) {
-        params.append('created_after', filters.dateFrom);
-      }
-      
-      if (filters.dateTo) {
-        params.append('created_before', filters.dateTo);
-      }
-
-      if (filters.mergedAfter) {
-        params.append('updated_after', filters.mergedAfter);
-      }
-
-      // Don't use scope=all for initial load without filters as it's too intensive
-      if (hasSpecificFilters) {
-        params.append('scope', 'all');
-      }
-      
-      params.append('order_by', filters.mergedAfter ? 'merged_at' : 'updated_at');
-      params.append('sort', 'desc');
-
-      // More generous page size for author-specific queries
-      const pageSize = filters.mergedAfter ? '100' : hasSpecificFilters ? '50' : '5';
-      params.append('per_page', pageSize);
-      
-      return params;
+    return {
+      ...result,
+      nextCursor: nextTargets.length > 0 || projectDiscovery
+        ? {
+            targets: nextTargets,
+            ...(projectDiscovery ? { projectDiscovery } : {})
+          }
+        : null,
+      warnings: Array.from(new Set([...warnings, ...result.warnings]))
     };
-
-    let allMergeRequests: GitLabMergeRequest[] = [];
-
-    try {
-      // If authors specified, make PARALLEL API calls for each author
-      if (filters.authors && filters.authors.length > 0) {
-        const authorPromises = filters.authors.map(async (author) => {
-          const params = buildParams(author);
-          const endpoint = `/merge_requests?${params.toString()}`;
-          
-          try {
-            return await this.makeRequest<GitLabMergeRequest[]>(endpoint, 8000, signal);
-          } catch (error) {
-            if (error instanceof Error && error.message === 'Request cancelled') {
-              throw error;
-            }
-            console.warn(`Failed to fetch MRs for author ${author}:`, error);
-            return [];
-          }
-        });
-        
-        // Wait for all author requests in parallel
-        const results = await Promise.all(authorPromises);
-        
-        // Flatten results and deduplicate using a Map (much faster than filter+findIndex)
-        const mrMap = new Map<number, GitLabMergeRequest>();
-        for (const authorMRs of results) {
-          for (const mr of authorMRs) {
-            // Keep the MR with the most recent updated_at if duplicate
-            const existing = mrMap.get(mr.id);
-            if (!existing || new Date(mr.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
-              mrMap.set(mr.id, mr);
-            }
-          }
-        }
-        
-        allMergeRequests = Array.from(mrMap.values());
-        
-        // Sort once after deduplication - GitLab sorts per-author, but we need to re-sort combined results
-        allMergeRequests.sort((a, b) => getMergeRequestSortTimestamp(b, filters) - getMergeRequestSortTimestamp(a, filters));
-      } else {
-        // Single API call - already sorted by GitLab, no need to re-sort
-        const params = buildParams();
-        const endpoint = `/merge_requests?${params.toString()}`;
-        const timeout = hasSpecificFilters ? 10000 : 12000;
-        allMergeRequests = await this.makeRequest<GitLabMergeRequest[]>(endpoint, timeout, signal);
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('timed out')) {
-        throw new Error('Request timed out. Try using more specific filters like author names to narrow down the search.');
-      } else {
-        throw error;
-      }
-    }
-    
-    // Enrich merge requests with project information in parallel
-    allMergeRequests = await this.enrichMergeRequestsWithProjects(allMergeRequests);
-
-    if (filters.approvalState || filters.notReviewedByMe) {
-      if (filters.notReviewedByMe) {
-        await this.getCurrentUser(signal);
-      }
-      allMergeRequests = await this.enrichMergeRequestsWithApprovalStatus(allMergeRequests, signal, true);
-    }
-    
-    return this.applyClientSideFilters(allMergeRequests, filters);
   }
 
-  async testConnection(): Promise<{ success: boolean; user?: GitLabUser; error?: string }> {
+  async testConnection(signal?: AbortSignal): Promise<{ success: boolean; user?: GitLabUser; error?: string }> {
     try {
-      const user = await this.makeRequest<GitLabUser>('/user');
+      const user = await this.http.request<GitLabUser>('/user', 30_000, signal);
       this.currentUser = user;
       return { success: true, user };
     } catch (error) {
@@ -1034,169 +1132,73 @@ export class GitLabService {
   }
 
   async getUsers(search?: string, signal?: AbortSignal): Promise<GitLabUser[]> {
-    try {
-      const allUsers = new Map<number, GitLabUser>();
-      
-      // Run group search only (no project users)
-      console.log('Searching for users in your organization groups...');
-      const [groupUsers] = await Promise.allSettled([
-        this.getGroupUsers(search, signal)
-      ]);
+    const query = search?.trim();
+    const userMap = new Map<number, GitLabUser>();
+    let groupFailure: unknown;
 
-      // Process group users results
-      if (groupUsers.status === 'fulfilled') {
-        console.log(`Found ${groupUsers.value.length} users from groups`);
-        groupUsers.value.forEach(user => allUsers.set(user.id, user));
-      } else {
-        console.warn('Failed to fetch group users:', groupUsers.reason);
-      }
-      
-      // Combine and return all unique users
-      const combinedUsers = Array.from(allUsers.values()).sort((a, b) => a.name.localeCompare(b.name));
-      console.log(`Returning ${combinedUsers.length} total unique users`);
-      
-      // Debug: If searching for a specific user and not found, try direct user API search
-      if (search && search.trim() && combinedUsers.length === 0) {
-        console.log(`No users found for search "${search}" in groups/projects. Trying direct user search for debugging...`);
-        try {
-          const directSearch = await this.makeRequest<GitLabUser[]>(`/users?search=${encodeURIComponent(search.trim())}&per_page=10`, 3000, signal);
-          console.log('Direct user search results:', directSearch.map(u => `${u.username} (${u.name})`).join(', '));
-          console.log('Note: These users may not be in your organization. Add them to your groups/projects to access them through the regular search.');
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Request cancelled') {
-            throw error;
-          }
-          console.warn('Direct user search failed:', error);
-        }
-      }
-      
-      return combinedUsers.slice(0, 50); // Reduced back to 50 for better performance
+    try {
+      const groupUsers = await this.getGroupUsers(query, signal);
+      groupUsers.forEach((user) => userMap.set(user.id, user));
     } catch (error) {
-      console.warn('Failed to fetch users:', error);
-      return [];
+      if (isCancelled(error)) throw error;
+      groupFailure = error;
     }
+
+    if (query) {
+      try {
+        const directUsers = await this.http.requestAllPages<GitLabUser>(
+          `/users?active=true&search=${encodeURIComponent(query)}`,
+          10_000,
+          signal,
+          2
+        );
+        directUsers.forEach((user) => userMap.set(user.id, user));
+      } catch (error) {
+        if (isCancelled(error)) throw error;
+        if (userMap.size === 0) throw groupFailure ?? error;
+      }
+    } else if (groupFailure) {
+      throw groupFailure;
+    }
+
+    const normalizedQuery = query?.toLowerCase();
+    return Array.from(userMap.values())
+      .filter((user) => !normalizedQuery || user.name.toLowerCase().includes(normalizedQuery) || user.username.toLowerCase().includes(normalizedQuery))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 100);
   }
 
   private async getGroupUsers(search?: string, signal?: AbortSignal): Promise<GitLabUser[]> {
-    try {
-      const userMap = new Map<number, GitLabUser>();
-      
-      // First, find the top-level group the user belongs to
-      const groups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&top_level_only=true&per_page=10', 5000, signal);
-      
-      if (groups.length === 0) {
-        console.log('No top-level groups found, trying regular groups...');
-        const allGroups = await this.makeRequest<GitLabGroup[]>('/groups?membership=true&per_page=10', 5000, signal);
-        // Use the first group as fallback
-        if (allGroups.length > 0) {
-          groups.push(allGroups[0]);
-          console.log(`Using fallback group: ${allGroups[0].name}`);
-        }
-      }
-      
-      // Search the first (primary) top-level group with server-side filtering
-      if (groups.length > 0) {
-        const primaryGroup = groups[0];
-        console.log(`Searching ${primaryGroup.name} group members...`);
-        
-        let groupEndpoint = `/groups/${primaryGroup.id}/members/all?per_page=200`;
-        
-        // Add search query parameter if provided
-        if (search && search.trim()) {
-          groupEndpoint += `&query=${encodeURIComponent(search.trim())}`;
-          console.log(`Using server-side search for: "${search}"`);
-        }
-        
-        const groupMembers = await this.makeRequest<GitLabUser[]>(groupEndpoint, 6000, signal);
-        console.log(`Found ${groupMembers.length} members in ${primaryGroup.name} group`);
-        
-        groupMembers.forEach(member => {
-          if (member && member.id && member.username && member.name) {
-            console.log(`Adding ${primaryGroup.name} user: ${member.username} (${member.name})`);
-            userMap.set(member.id, {
-              id: member.id,
-              name: member.name,
-              username: member.username,
-              avatar_url: member.avatar_url || ''
-            });
-          }
-        });
-      } else {
-        console.warn('No groups found - user may not belong to any groups');
-      }
-      
-      // Return unique users, sorted by name
-      const users = Array.from(userMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-      console.log(`Returning ${users.length} users from top-level group`);
-      console.log('Group users found:', users.map(u => `${u.username} (${u.name})`).join(', '));
-      return users;
-      
-    } catch (error) {
-      console.warn('Failed to fetch group users:', error);
-      return [];
+    let groups = await this.http.requestAllPages<GitLabGroup>(
+      '/groups?membership=true&top_level_only=true',
+      10_000,
+      signal
+    );
+    if (groups.length === 0) {
+      groups = await this.http.requestAllPages<GitLabGroup>('/groups?membership=true', 10_000, signal);
     }
-  }
 
-  private async getProjectUsers(search?: string): Promise<GitLabUser[]> {
-    try {
-      // Get users from projects you're a member of - optimized limits
-      const projects = await this.makeRequest<GitLabProject[]>('/projects?membership=true&simple=true&per_page=20', 3000);
-      console.log(`Found ${projects.length} projects you're a member of`);
-      const userMap = new Map<number, GitLabUser>();
-      
-      // Process first 5 projects in parallel for better performance
-      const sampleProjects = projects.slice(0, 5);
-      
-      const projectPromises = sampleProjects.map(async (project) => {
-        try {
-          console.log(`Fetching members from project: ${project.name}`);
-          const memberEndpoint = `/projects/${project.id}/members/all?per_page=50`; // Reduced from 100
-          const members = await this.makeRequest<GitLabUser[]>(memberEndpoint, 4000); // Reduced timeout
-          console.log(`Found ${members.length} members in project ${project.name}`);
-          return { project, members };
-        } catch (err) {
-          console.warn(`Failed to fetch members from project ${project.name}:`, err);
-          return { project, members: [] };
-        }
-      });
+    const results = await mapWithConcurrency(groups, 4, (group) => {
+      const queryParam = search ? `?query=${encodeURIComponent(search)}` : '';
+      return this.http.requestAllPages<GitLabUser>(
+        `/groups/${group.id}/members/all${queryParam}`,
+        15_000,
+        signal
+      );
+    });
+    const userMap = new Map<number, GitLabUser>();
+    let firstFailure: unknown;
 
-      const results = await Promise.allSettled(projectPromises);
-      
-      results.forEach((result) => {
-        if (result.status === 'fulfilled') {
-          const { members } = result.value;
-          members.forEach(member => {
-            if (member && member.id && member.username && member.name) {
-              // More flexible search - check if search term appears anywhere in username or name
-              const matchesSearch = !search || 
-                    member.name.toLowerCase().includes(search.toLowerCase()) ||
-                    member.username.toLowerCase().includes(search.toLowerCase()) ||
-                    member.username.toLowerCase().startsWith(search.toLowerCase()) ||
-                    member.name.toLowerCase().startsWith(search.toLowerCase());
-              
-              if (matchesSearch) {
-                console.log(`Adding project user: ${member.username} (${member.name}) - matches search: ${search || 'no search'}`);
-                userMap.set(member.id, {
-                  id: member.id,
-                  name: member.name,
-                  username: member.username,
-                  avatar_url: member.avatar_url || ''
-                });
-              }
-            }
-          });
-        }
-      });
-      
-      // Return unique users, sorted by name
-      const users = Array.from(userMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-      console.log(`Returning ${users.length} users from projects`);
-      console.log('Project users found:', users.map(u => `${u.username} (${u.name})`).join(', '));
-      return users;
-      
-    } catch (error) {
-      console.warn('Failed to fetch project users:', error);
-      return [];
-    }
+    results.forEach((result) => {
+      if (result.status === 'rejected') {
+        if (isCancelled(result.reason)) throw result.reason;
+        firstFailure ??= result.reason;
+        return;
+      }
+      result.value.forEach((user) => userMap.set(user.id, user));
+    });
+
+    if (groups.length > 0 && userMap.size === 0 && firstFailure) throw firstFailure;
+    return Array.from(userMap.values());
   }
 }

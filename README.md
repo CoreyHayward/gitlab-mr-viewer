@@ -1,160 +1,114 @@
 # GitLab MR Viewer
 
-A note: This project was created as an experiment with agentic code tools to explore and test the current state of agent mode and AI-assisted development.
+A static, client-side workspace for finding GitLab merge requests, monitoring merge trains, and reviewing changed code. It supports GitLab.com and self-managed instances whose API permits browser requests.
 
-A lightweight, client-side web app for advanced filtering and viewing of GitLab merge requests. Built with Next.js and designed with privacy in mind - your API token never leaves your browser.
+This project began as an experiment with agentic development tools and remains a practical personal/team utility.
 
-## Features
+## What it does
 
-✨ **Advanced Filtering**: Filter merge requests by state, author, assignee, reviewer, labels, branches, dates, and more  
-🔒 **Client-Side Only**: All API calls are made directly from your browser to GitLab - no server-side processing  
-🔐 **Privacy Focused**: Your GitLab API token is stored only in your browser's memory  
-🎨 **Clean Interface**: Modern, responsive design that works in light and dark mode  
-⚡ **Fast & Lightweight**: Built on static export - can be deployed anywhere  
-🔍 **Rich Display**: View merge request details, pipeline status, comments, labels, and more
-🧭 **Guided Semantic Reviews**: Open any merge request in a focused, code-first walkthrough that groups related files into review concepts
-🤖 **Optional Bring-Your-Own AI**: Use OpenAI or another OpenAI-compatible provider to improve semantic grouping and ask questions about the changed code
+- Lists merge requests progressively across projects the current user belongs to, or within one or more selected projects, without relying on GitLab's expensive unfiltered instance-wide `scope=all` query.
+- Loads paginated results on demand, preserves successful results when one GitLab request fails, and identifies partial data in the UI.
+- Filters by state, approval state, author, exact project name/path, title inclusion/exclusion, draft status, and created/merged dates.
+- Provides quick views for your open MRs, MRs needing approval, MRs you have not approved, and recently merged MRs.
+- Shares the current project/filter/review location through the URL and supports manual or idle one-minute refresh.
+- Monitors active merge trains for a separately saved set of projects, including a visible train-yard view.
+- Opens a guided review that groups related files, tracks private notes and review status, highlights new commits, and exposes incomplete GitLab diffs instead of hiding them.
+- Displays existing GitLab discussions and can post line/range comments and thread replies.
+- Can approve an MR from the final review step. Approval intentionally remains available regardless of local review progress.
+- Optionally uses an OpenAI-compatible provider to refine grouping or answer questions about a concept or selected diff range. Provider payloads are bounded; files omitted from an exceptionally large AI request remain represented by the local fallback review.
 
-## Getting Started
+## Run locally
 
-### Development
+Requirements: Node.js 20 or newer and npm.
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
-
-### Production Build
-
-For static hosting (GitHub Pages, Netlify, etc.):
 ```bash
+npm ci
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+Useful checks:
+
+```bash
+npm run check
+npm run build
 npm run build:static
 ```
 
-For regular Next.js deployment:
-```bash
-npm run build
+`build:static` writes the deployable site to `out/`.
+
+### Live GitLab API benchmark
+
+The normal test suite never contacts GitLab. To compare the current REST detail path with the combined GraphQL path against real data, create an ignored `.env.gitlab.local` file:
+
+```dotenv
+GITLAB_BENCHMARK_URL=https://gitlab.com
+GITLAB_BENCHMARK_TOKEN=<temporary token with read_api scope>
+GITLAB_BENCHMARK_AUTHORS=<comma-separated usernames>
 ```
 
-The app is configured to export as static files, so the `out/` directory can be deployed to any static hosting service.
+Then run `npm run test:gitlab-api`. The benchmark verifies MR identities, project metadata, approval counts, approver usernames, and diff totals, but reports only aggregate timings and request counts. Delete the temporary credential file after the run.
 
-## Deployment to GitHub Pages
+## Connect to GitLab
 
-This app is configured for automatic deployment to GitHub Pages:
+1. Enter the base URL of GitLab, such as `https://gitlab.com`.
+2. Create a personal access token with the `api` and `read_user` scopes.
+3. Enter the token and let the app validate `/api/v4/user` before opening the workspace.
 
-1. **Fork or clone this repository** to your GitHub account
+The `api` scope is needed for optional approval and discussion actions as well as reads. A self-managed GitLab instance must allow the deployed site’s origin through CORS.
 
-2. **Enable GitHub Pages**:
-   - Go to your repository Settings → Pages
-   - Set Source to "GitHub Actions"
+The project selector scopes the API request itself. The **Specific Projects** advanced filter instead matches exact project names or full namespace paths within the merge-request pages you load.
 
-3. **Push to main branch**:
-   - The GitHub Actions workflow will automatically build and deploy
-   - Your app will be available at `https://yourusername.github.io/gitlab-mr-viewer/`
+## Guided review
 
-4. **Manual deployment** (if needed):
-   ```bash
-   npm run build:static
-   # Upload the contents of the `out/` directory to your hosting service
-   ```
+Choose **Guided review** on an MR card. The workspace loads MR metadata, every available page from GitLab’s merge-request diffs endpoint, and every discussion page. It then:
 
-### Repository Setup
+- creates a local semantic outline (optionally refined by AI);
+- preserves all files and all diff text returned by GitLab;
+- previews long files in a focused view with a **Show all diff lines** action;
+- saves notes and status after a short debounce;
+- marks every affected concept stale when later commits touch its files;
+- warns when GitLab marks files `collapsed` or `too_large`, or otherwise returns fewer files than reported.
 
-The following files enable GitHub Pages deployment:
-- `.github/workflows/deploy.yml` - Automated build and deployment
-- `next.config.ts` - Configured for static export
-- `public/.nojekyll` - Ensures GitHub Pages serves all files correctly
+GitLab can omit very large files at the API boundary. The warning links the decision back to GitLab; it does not disable approval.
 
-## Usage
+Review progress, cached workspace data, discussions, and watched merge-train projects are scoped by GitLab instance and current user. Older local caches are migrated when they can be attributed to the active connection.
 
-1. **Configure GitLab Connection**:
-   - Enter your GitLab instance URL (e.g., `https://gitlab.com`)
-   - Create a Personal Access Token with `api` and `read_user` scopes
-   - The connection is tested before proceeding
+## Optional AI provider
 
-2. **Select a Project**:
-   - Choose from your accessible GitLab projects
-   - Search functionality helps find projects quickly
+The default is an editable `gpt-5-mini` model at `https://api.openai.com/v1`. A custom provider must implement the Chat Completions API and allow browser CORS requests.
 
-3. **Filter Merge Requests**:
-   - Use the comprehensive filter panel to narrow down results
-   - Filters include: state, author, assignee, reviewer, labels, branches, dates, draft status, and title search
+The provider receives bounded portions of the MR title, description, changed paths, and diffs needed for the requested operation. Diff text is treated as untrusted input in the system prompt. The app does not send this data through an application server.
 
-4. **View Results**:
-   - Browse merge requests with rich information display
-   - Click titles to open merge requests in GitLab
-   - See pipeline status, assignees, reviewers, labels, and more
+## Browser storage and privacy
 
-5. **Start a Guided Review**:
-   - Select **Guided review** on any merge-request card
-   - Review related code in semantic concepts, keep private notes, flag concerns, and mark concepts reviewed
-   - Progress, notes, and the clipped review diff are saved in this browser only, so reopening the same merge request continues where you left off
-   - Without an AI key, the app uses a local rule-based grouping. Add an optional key in GitLab configuration or **Connection settings** after logging in to have an OpenAI-compatible model refine the grouping and answer questions about the selected changed code
-
-### Optional AI provider
-
-The default API base URL is `https://api.openai.com/v1`, with `gpt-5-mini` as the editable default model. The custom provider URL is hidden until you choose **Use a custom OpenAI-compatible endpoint**. Providers must accept the Chat Completions API and allow browser CORS requests.
-
-The app sends only the merge-request title, description, and a bounded/clipped diff to the selected provider. The API key stays in memory unless you explicitly opt in to remembering it in the browser. OpenAI recommends managing production API keys server-side; use the direct static-app option only with a personal, restricted key on a trusted device.
-
-## Security & Privacy
-
-- 🔒 **No Server Processing**: All GitLab API calls are made client-side
-- 🚫 **No Data Storage**: Your API token and data are never sent to our servers
-- 💾 **Local Storage Only**: Token is stored in your browsers local storage
-- 🌐 **Direct Connection**: Your browser connects directly to GitLab's API
-- 📦 **Static Deployment**: Can be self-hosted on any static hosting service
-- 🧠 **Browser-Only Review State**: Guided review sections, notes, progress, and cached diffs are stored locally and are never written to GitLab or an app server
-
-## Technology Stack
-
-- **Framework**: Next.js 15 with App Router
-- **Styling**: Tailwind CSS 4
-- **Language**: TypeScript
-- **Export**: Static site generation
-- **API**: GitLab REST API v4
-
-## GitLab API Token Setup
-
-1. Go to your GitLab instance (e.g., gitlab.com)
-2. Navigate to: **Settings** → **Access Tokens** → **Personal Access Tokens**
-3. Create a new token with these scopes:
-   - `api` - Full API access
-   - `read_user` - Read user information
-4. Copy the token and paste it into the app
-
-## Supported GitLab Instances
-
-- GitLab.com (gitlab.com)
-- Self-managed GitLab instances
-- GitLab Enterprise
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details.
+- GitLab and optional AI calls go directly from the browser to the configured provider.
+- Tokens remain in memory unless you choose to remember them in browser local storage.
+- Saved review state and merge-train selections stay in browser local storage, namespaced by instance and user.
+- Disconnect clears saved GitLab and AI credentials; local review progress remains available for that same scoped account.
+- This client-only model is best suited to a trusted device and restricted personal tokens.
 
 ## Deployment
 
-Since this is a static export, you can deploy to:
+The app uses Next.js static export and can be hosted on GitHub Pages, Netlify, Vercel static hosting, or any web server that serves `out/`.
 
-- **Vercel**: Push to GitHub and connect to Vercel
-- **Netlify**: Drag and drop the `out/` folder
-- **GitHub Pages**: Use the static files from `out/`
-- **Any Static Host**: Upload the contents of `out/`
-- **Self-hosted**: Serve the `out/` directory with any web server
+For GitHub Pages:
 
-The app works entirely client-side, so no server configuration is needed.
+1. Set **Settings → Pages → Source** to **GitHub Actions**.
+2. Push to `main`.
+3. The workflow type-checks, lints, and tests first, then builds and deploys with Pages-only permissions on the deploy job.
+
+Pull requests run the quality job but never receive Pages or OIDC write permissions.
+
+## Stack
+
+- Next.js 15 and React 19
+- TypeScript
+- Tailwind CSS 4
+- Vitest
+- GitLab REST API v4 and GraphQL for batched project, approval, and diff details
+
+## License
+
+[MIT](LICENSE)

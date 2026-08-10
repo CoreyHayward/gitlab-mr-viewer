@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { FilterOptions } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
 import LegacyUserMultiSelect from './LegacyUserMultiSelect';
+import { MAX_SHARED_LIST_VALUE_LENGTH, MAX_SHARED_LIST_VALUES, MAX_SHARED_TEXT_LENGTH } from '@/utils/urlState';
 import { Filter, ChevronDown, Search, Ban, Layers, Calendar, Trash2, Check } from 'lucide-react';
 
 interface FilterPanelProps {
@@ -28,7 +29,11 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
   };
 
   const handleProjectsChange = (value: string) => {
-    const projects = value.split(',').map(p => p.trim()).filter(p => p.length > 0);
+    const projects = Array.from(new Set(value
+      .split(',')
+      .map((project) => project.trim().slice(0, MAX_SHARED_LIST_VALUE_LENGTH))
+      .filter(Boolean)))
+      .slice(0, MAX_SHARED_LIST_VALUES);
     handleFilterChange('projects', projects.length > 0 ? projects : undefined);
   };
 
@@ -41,12 +46,13 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
   // Count active filters (excluding default state)
   const activeFiltersCount = Object.entries(localFilters).filter(([key, value]) => {
     if (key === 'state' && value === 'opened') return false; // Default state
+    if (key === 'notReviewedByMe' && value !== true) return false;
     return value !== undefined && value !== '' && (!Array.isArray(value) || value.length > 0);
   }).length;
 
   return (
     <div className="relative">
-      <button type="button" onClick={onToggle} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-100 dark:hover:bg-neutral-700" aria-expanded={isExpanded}>
+      <button type="button" onClick={onToggle} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-100 dark:hover:bg-neutral-700" aria-expanded={isExpanded} aria-controls="advanced-filter-panel">
         <Filter className="h-4 w-4 text-violet-600 dark:text-violet-300" />
         <span>Advanced filters</span>
         {activeFiltersCount > 0 && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-violet-800 dark:bg-violet-900/50 dark:text-violet-200">{activeFiltersCount}</span>}
@@ -54,7 +60,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
       </button>
 
       {isExpanded && (
-        <div className="absolute left-0 z-30 mt-2 w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
+        <div id="advanced-filter-panel" className="absolute left-0 z-30 mt-2 w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
           <div className="p-6 space-y-8">
             {/* Quick Filters Section */}
             <div className="space-y-4">
@@ -64,11 +70,12 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* State Filter */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="merge-request-state-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Merge Request State
                   </label>
                   <div className="relative">
                     <select
+                      id="merge-request-state-filter"
                       value={localFilters.state || 'all'}
                       onChange={(e) => handleFilterChange('state', e.target.value as 'opened' | 'closed' | 'merged' | 'all')}
                       className="w-full px-4 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white transition-all duration-200 appearance-none cursor-pointer hover:border-gray-400 dark:hover:border-neutral-500"
@@ -105,7 +112,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Title Search */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="merge-request-title-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Search in Title
                   </label>
                   <div className="relative">
@@ -113,7 +120,9 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
                       <Search className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
+                      id="merge-request-title-filter"
                       type="text"
+                      maxLength={MAX_SHARED_TEXT_LENGTH}
                       value={localFilters.title || ''}
                       onChange={(e) => handleFilterChange('title', e.target.value || undefined)}
                       placeholder="Search merge request titles..."
@@ -124,7 +133,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
 
                 {/* Exclude Title */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="merge-request-exclude-title-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Exclude by Title
                   </label>
                   <div className="relative">
@@ -132,7 +141,9 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
                       <Ban className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
+                      id="merge-request-exclude-title-filter"
                       type="text"
+                      maxLength={MAX_SHARED_TEXT_LENGTH}
                       value={localFilters.excludeTitle || ''}
                       onChange={(e) => handleFilterChange('excludeTitle', e.target.value || undefined)}
                       placeholder="Exclude titles containing..."
@@ -143,16 +154,18 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
 
                 {/* Projects Filter */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="merge-request-project-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Specific Projects
-                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">(when viewing all)</span>
+                    <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">(exact name or path; up to {MAX_SHARED_LIST_VALUES})</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Layers className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
+                      id="merge-request-project-filter"
                       type="text"
+                      maxLength={(MAX_SHARED_LIST_VALUE_LENGTH + 2) * MAX_SHARED_LIST_VALUES}
                       value={localFilters.projects?.join(', ') || ''}
                       onChange={(e) => handleProjectsChange(e.target.value)}
                       placeholder="project1, group/project2, ..."
@@ -171,7 +184,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Date From */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="merge-request-created-after-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Created After
                   </label>
                   <div className="relative">
@@ -179,6 +192,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
                       <Calendar className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
+                      id="merge-request-created-after-filter"
                       type="date"
                       value={localFilters.dateFrom || ''}
                       onChange={(e) => handleFilterChange('dateFrom', e.target.value || undefined)}
@@ -189,7 +203,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
 
                 {/* Date To */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <label htmlFor="merge-request-created-before-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Created Before
                   </label>
                   <div className="relative">
@@ -197,6 +211,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
                       <Calendar className="w-4 h-4 text-gray-400" />
                     </div>
                     <input
+                      id="merge-request-created-before-filter"
                       type="date"
                       value={localFilters.dateTo || ''}
                       onChange={(e) => handleFilterChange('dateTo', e.target.value || undefined)}
@@ -243,6 +258,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
 
                 {activeFiltersCount > 0 && (
                   <button
+                    type="button"
                     onClick={clearFilters}
                     className="inline-flex items-center px-4 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-lg border border-gray-200 dark:border-neutral-600 transition-all duration-200 hover:shadow-sm"
                   >

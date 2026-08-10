@@ -107,7 +107,7 @@ export const parseDiff = (diff: string, limit = 260): ParsedDiff => {
       continue;
     }
 
-    if (!inHunk || rawLine.startsWith('---') || rawLine.startsWith('+++') || rawLine.startsWith('\\')) continue;
+    if (!inHunk || rawLine.startsWith('\\')) continue;
 
     if (rawLine.startsWith('+')) {
       allLines.push({

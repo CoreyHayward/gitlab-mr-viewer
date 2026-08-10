@@ -1,20 +1,24 @@
 {
   "name": "gitlab-mr-viewer",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
     "build:static": "next build && touch out/.nojekyll",
     "start": "next start",
-    "lint": "next lint",
-    "test": "vitest run"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:gitlab-api": "node --env-file=.env.gitlab.local ./node_modules/vitest/vitest.mjs run --config vitest.live.config.mjs",
+    "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
     "lucide-react": "^1.6.0",
-    "next": "15.4.5",
-    "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "next": "15.5.21",
+    "react": "19.1.8",
+    "react-dom": "19.1.8"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -23,7 +27,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.4.5",
+    "eslint-config-next": "15.5.21",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"

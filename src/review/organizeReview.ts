@@ -165,26 +165,41 @@ const safeRisk = (value: unknown): RiskLevel => (
   value === 'high' || value === 'low' || value === 'medium' ? value : 'medium'
 );
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(
+  value && typeof value === 'object' && !Array.isArray(value)
+);
+
 export function normaliseAiReview(
   ai: AiReviewOutline,
   fallback: SemanticReview,
   changes: ReviewFileChange[]
 ): SemanticReview {
-  if (!ai || !Array.isArray(ai.sections) || ai.sections.length === 0) return fallback;
+  if (!isRecord(ai) || !Array.isArray(ai.sections) || ai.sections.length === 0) return fallback;
 
   const byPath = new Map(changes.map((file) => [file.path, file]));
   const usedIds = new Set<string>();
+  const usedPaths = new Set<string>();
   const sections: SemanticSection[] = [];
 
   for (const [index, candidate] of ai.sections.slice(0, 8).entries()) {
+    if (!isRecord(candidate)) continue;
     const paths = Array.isArray(candidate.filePaths)
-      ? [...new Set(candidate.filePaths.filter((path): path is string => typeof path === 'string' && byPath.has(path)))].slice(0, 24)
+      ? [...new Set(candidate.filePaths.filter((path): path is string => (
+        typeof path === 'string' && byPath.has(path) && !usedPaths.has(path)
+      )))].slice(0, 24)
       : [];
     if (!paths.length) continue;
 
-    let id = short(candidate.id, `concept-${index + 1}`, 60).replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-    if (!id || usedIds.has(id)) id = `concept-${index + 1}`;
+    const requestedId = short(candidate.id, `concept-${index + 1}`, 60).replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+    const baseId = requestedId || `concept-${index + 1}`;
+    let id = baseId;
+    let suffix = 2;
+    while (usedIds.has(id)) {
+      id = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
     usedIds.add(id);
+    paths.forEach((path) => usedPaths.add(path));
 
     const files = paths.map((path) => byPath.get(path)).filter((file): file is ReviewFileChange => Boolean(file));
     sections.push({
@@ -209,17 +224,24 @@ export function normaliseAiReview(
   const covered = new Set(sections.flatMap((section) => section.filePaths));
   const uncovered = changes.filter((file) => !covered.has(file.path));
   if (uncovered.length) {
-    sections.push({ ...sectionFor(categories[7], uncovered), id: 'remaining-changes' });
+    let remainingId = 'remaining-changes';
+    let suffix = 2;
+    while (usedIds.has(remainingId)) {
+      remainingId = `remaining-changes-${suffix}`;
+      suffix += 1;
+    }
+    sections.push({ ...sectionFor(categories[7], uncovered), id: remainingId });
   }
 
   const validIds = new Set(sections.map((section) => section.id));
+  const overview: Record<string, unknown> = isRecord(ai.overview) ? ai.overview : {};
   return {
     overview: {
-      purpose: short(ai.overview?.purpose, fallback.overview.purpose, 400),
-      scope: short(ai.overview?.scope, fallback.overview.scope, 280),
-      riskSummary: short(ai.overview?.riskSummary, fallback.overview.riskSummary, 360),
-      areas: Array.isArray(ai.overview?.areas)
-        ? ai.overview.areas.filter((area): area is string => typeof area === 'string' && Boolean(area.trim())).slice(0, 8).map((area) => area.slice(0, 60))
+      purpose: short(overview.purpose, fallback.overview.purpose, 400),
+      scope: short(overview.scope, fallback.overview.scope, 280),
+      riskSummary: short(overview.riskSummary, fallback.overview.riskSummary, 360),
+      areas: Array.isArray(overview.areas)
+        ? overview.areas.filter((area: unknown): area is string => typeof area === 'string' && Boolean(area.trim())).slice(0, 8).map((area: string) => area.slice(0, 60))
         : fallback.overview.areas
     },
     sections: sections.map((section, index) => ({

@@ -19,10 +19,9 @@ import {
   X
 } from 'lucide-react';
 
-const WATCHED_PROJECTS_KEY = 'gitlab-merge-train-watch-projects';
+const LEGACY_WATCHED_PROJECTS_KEY = 'gitlab-merge-train-watch-projects';
+const WATCHED_PROJECTS_KEY_PREFIX = 'gitlab-merge-train-watch-projects:v2:';
 const REFRESH_INTERVAL_MS = 60_000;
-const TRAIN_MODE_CLICK_COUNT = 5;
-const TRAIN_MODE_CLICK_WINDOW_MS = 1400;
 
 interface MergeTrainWatcherProps {
   service: GitLabService;
@@ -43,28 +42,33 @@ const isProject = (value: unknown): value is GitLabProject => {
   );
 };
 
-const loadWatchedProjects = (): GitLabProject[] => {
+const loadWatchedProjects = (key: string): GitLabProject[] => {
   if (typeof window === 'undefined') return [];
 
   try {
-    const saved = localStorage.getItem(WATCHED_PROJECTS_KEY);
+    const saved = localStorage.getItem(key) ?? localStorage.getItem(LEGACY_WATCHED_PROJECTS_KEY);
     if (!saved) return [];
 
     const projects = JSON.parse(saved);
     if (!Array.isArray(projects)) return [];
 
-    return projects.filter(isProject);
+    const validProjects = projects.filter(isProject);
+    if (!localStorage.getItem(key) && validProjects.length > 0) {
+      localStorage.setItem(key, JSON.stringify(validProjects));
+      localStorage.removeItem(LEGACY_WATCHED_PROJECTS_KEY);
+    }
+    return validProjects;
   } catch (error) {
     console.warn('Failed to load merge train watched projects:', error);
     return [];
   }
 };
 
-const saveWatchedProjects = (projects: GitLabProject[]) => {
+const saveWatchedProjects = (key: string, projects: GitLabProject[]) => {
   if (typeof window === 'undefined') return;
 
   try {
-    localStorage.setItem(WATCHED_PROJECTS_KEY, JSON.stringify(projects));
+    localStorage.setItem(key, JSON.stringify(projects));
   } catch (error) {
     console.warn('Failed to save merge train watched projects:', error);
   }
@@ -90,8 +94,11 @@ export default function LegacyMergeTrainWatcher({
   const pickerRef = useRef<HTMLDivElement>(null);
   const projectAbortControllerRef = useRef<AbortController | null>(null);
   const statusAbortControllerRef = useRef<AbortController | null>(null);
-  const titleClickCountRef = useRef(0);
-  const titleClickTimeoutRef = useRef<number | null>(null);
+  const watchedProjectsKey = useMemo(() => {
+    const instance = service.getInstanceUrl().trim().replace(/\/+$/, '').toLowerCase();
+    const user = service.getCurrentUserId() ?? 'unknown-user';
+    return `${WATCHED_PROJECTS_KEY_PREFIX}${encodeURIComponent(`${instance}|${user}`)}`;
+  }, [service]);
 
   useEffect(() => {
     const savedUIState = loadUIState();
@@ -99,18 +106,17 @@ export default function LegacyMergeTrainWatcher({
       setIsExpanded(savedUIState.mergeTrainWatcherExpanded);
     }
 
-    setWatchedProjects(loadWatchedProjects());
-  }, []);
+    setWatchedProjects(loadWatchedProjects(watchedProjectsKey));
+  }, [watchedProjectsKey]);
 
   const refreshStatuses = useCallback(async (projects = watchedProjects) => {
+    statusAbortControllerRef.current?.abort();
+
     if (projects.length === 0) {
       setStatuses([]);
       setLastUpdated(null);
+      setStatusLoading(false);
       return;
-    }
-
-    if (statusAbortControllerRef.current) {
-      statusAbortControllerRef.current.abort();
     }
 
     const controller = new AbortController();
@@ -124,9 +130,7 @@ export default function LegacyMergeTrainWatcher({
         setLastUpdated(new Date());
       }
     } catch (error) {
-      if (error instanceof Error && error.message === 'Request cancelled') {
-        return;
-      }
+      if (controller.signal.aborted) return;
 
       setStatuses(projects.map((project) => ({
         project,
@@ -156,9 +160,7 @@ export default function LegacyMergeTrainWatcher({
         setProjectOptions(projects);
       }
     } catch (error) {
-      if (error instanceof Error && error.message === 'Request cancelled') {
-        return;
-      }
+      if (controller.signal.aborted) return;
 
       setProjectError(error instanceof Error ? error.message : 'Failed to load projects');
     } finally {
@@ -169,19 +171,36 @@ export default function LegacyMergeTrainWatcher({
   }, [service]);
 
   useEffect(() => {
-    if (!isPickerOpen) return;
-    void loadProjectOptions(searchTerm.trim() || undefined);
+    if (!isPickerOpen) {
+      projectAbortControllerRef.current?.abort();
+      setProjectLoading(false);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => void loadProjectOptions(searchTerm.trim() || undefined),
+      searchTerm.trim() ? 300 : 0
+    );
+    return () => {
+      window.clearTimeout(timer);
+      projectAbortControllerRef.current?.abort();
+    };
   }, [isPickerOpen, loadProjectOptions, searchTerm]);
 
   useEffect(() => {
-    if (watchedProjects.length === 0) return;
+    if (watchedProjects.length === 0) {
+      void refreshStatuses([]);
+      return;
+    }
 
     void refreshStatuses(watchedProjects);
     const intervalId = window.setInterval(() => {
       void refreshStatuses(watchedProjects);
     }, REFRESH_INTERVAL_MS);
 
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+      statusAbortControllerRef.current?.abort();
+    };
   }, [refreshStatuses, watchedProjects]);
 
   useEffect(() => {
@@ -203,9 +222,6 @@ export default function LegacyMergeTrainWatcher({
       if (statusAbortControllerRef.current) {
         statusAbortControllerRef.current.abort();
       }
-      if (titleClickTimeoutRef.current) {
-        window.clearTimeout(titleClickTimeoutRef.current);
-      }
     };
   }, []);
 
@@ -224,7 +240,7 @@ export default function LegacyMergeTrainWatcher({
 
     setWatchedProjects(uniqueProjects);
     setStatuses((currentStatuses) => currentStatuses.filter((status) => uniqueProjectIds.has(status.project.id)));
-    saveWatchedProjects(uniqueProjects);
+    saveWatchedProjects(watchedProjectsKey, uniqueProjects);
 
     if (uniqueProjects.length === 0) {
       setStatuses([]);
@@ -247,6 +263,22 @@ export default function LegacyMergeTrainWatcher({
     updateWatchedProjects([]);
   };
 
+  const handlePickerListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const options = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
+    if (options.length === 0) return;
+    event.preventDefault();
+    const currentIndex = options.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? options.length - 1
+        : event.key === 'ArrowDown'
+          ? Math.min(currentIndex + 1, options.length - 1)
+          : Math.max(currentIndex < 0 ? options.length - 1 : currentIndex - 1, 0);
+    options[nextIndex]?.focus();
+  };
+
   const handleExpandedToggle = () => {
     const nextExpanded = !isExpanded;
     setIsExpanded(nextExpanded);
@@ -255,27 +287,6 @@ export default function LegacyMergeTrainWatcher({
 
   const getProjectStatus = (project: GitLabProject) => {
     return statuses.find((status) => status.project.id === project.id) ?? { project, trains: [] };
-  };
-
-  const handleTitleClick = (event: React.MouseEvent<HTMLHeadingElement>) => {
-    event.stopPropagation();
-
-    if (titleClickTimeoutRef.current) {
-      window.clearTimeout(titleClickTimeoutRef.current);
-    }
-
-    titleClickCountRef.current += 1;
-
-    if (titleClickCountRef.current >= TRAIN_MODE_CLICK_COUNT) {
-      titleClickCountRef.current = 0;
-      onTrainModeChange?.(!trainModeEnabled);
-      return;
-    }
-
-    titleClickTimeoutRef.current = window.setTimeout(() => {
-      titleClickCountRef.current = 0;
-      titleClickTimeoutRef.current = null;
-    }, TRAIN_MODE_CLICK_WINDOW_MS);
   };
 
   const formatRelativeTime = (date: Date) => {
@@ -359,7 +370,10 @@ export default function LegacyMergeTrainWatcher({
       }))
     ));
 
-    const clearProjects = watchedProjects.filter((project) => getProjectStatus(project).trains.length === 0);
+    const clearProjects = watchedProjects.filter((project) => {
+      const status = getProjectStatus(project);
+      return status.trains.length === 0 && !status.error;
+    });
 
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-900 dark:bg-amber-950/20">
@@ -473,11 +487,7 @@ export default function LegacyMergeTrainWatcher({
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2
-                  onClick={handleTitleClick}
-                  title="Merge Train Watcher"
-                  className={`text-base font-semibold text-gray-900 dark:text-white ${trainModeEnabled ? 'text-amber-800 dark:text-amber-200' : ''}`}
-                >
+                <h2 className={`text-base font-semibold text-gray-900 dark:text-white ${trainModeEnabled ? 'text-amber-800 dark:text-amber-200' : ''}`}>
                   Merge Train Watcher
                 </h2>
                 {watchedProjects.length > 0 && (
@@ -497,12 +507,25 @@ export default function LegacyMergeTrainWatcher({
           </button>
 
           <div className="flex items-center gap-1">
+            {onTrainModeChange && (
+              <button
+                type="button"
+                onClick={() => onTrainModeChange(!trainModeEnabled)}
+                className={`rounded-md p-2 transition-colors ${trainModeEnabled ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-100' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200'}`}
+                title={trainModeEnabled ? 'Close merge train yard' : 'Open merge train yard'}
+                aria-label={trainModeEnabled ? 'Close merge train yard' : 'Open merge train yard'}
+                aria-pressed={trainModeEnabled}
+              >
+                <GitBranch className="h-4 w-4" />
+              </button>
+            )}
             {onHide && (
               <button
                 type="button"
                 onClick={onHide}
                 className="rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
                 title="Hide merge train watcher"
+                aria-label="Hide merge train watcher"
               >
                 <EyeOff className="h-4 w-4" />
               </button>
@@ -513,6 +536,7 @@ export default function LegacyMergeTrainWatcher({
               disabled={statusLoading || watchedProjects.length === 0}
               className="rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
               title="Refresh merge trains"
+              aria-label="Refresh merge trains"
             >
               <RefreshCcw className={`h-4 w-4 ${statusLoading ? 'animate-spin' : ''}`} />
             </button>
@@ -521,6 +545,8 @@ export default function LegacyMergeTrainWatcher({
               onClick={handleExpandedToggle}
               className="rounded-md p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200 xl:hidden"
               title="Toggle merge train watcher"
+              aria-label="Toggle merge train watcher"
+              aria-expanded={isExpanded || trainModeEnabled}
             >
               <ChevronDown className={`h-5 w-5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
             </button>
@@ -532,6 +558,9 @@ export default function LegacyMergeTrainWatcher({
             <button
               type="button"
               onClick={() => setIsPickerOpen((open) => !open)}
+              aria-haspopup="listbox"
+              aria-expanded={isPickerOpen}
+              aria-controls="merge-train-project-options"
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-gray-200 dark:hover:border-neutral-600 dark:hover:bg-neutral-900"
             >
               <span className="flex min-w-0 items-center gap-2">
@@ -551,19 +580,31 @@ export default function LegacyMergeTrainWatcher({
                       value={searchTerm}
                       onChange={(event) => setSearchTerm(event.target.value)}
                       placeholder="Search repos..."
+                      aria-label="Search repositories to watch"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="true"
+                      aria-controls="merge-train-project-options"
+                      onKeyDown={(event) => {
+                        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                        const options = Array.from(pickerRef.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+                        if (options.length === 0) return;
+                        event.preventDefault();
+                        options[event.key === 'ArrowDown' ? 0 : options.length - 1]?.focus();
+                      }}
                       className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-neutral-600 dark:bg-neutral-700 dark:text-white"
                     />
                   </div>
                 </div>
 
-                <div className="max-h-72 overflow-y-auto">
+                <div id="merge-train-project-options" className="max-h-72 overflow-y-auto" role="listbox" aria-label="Repositories to watch" aria-multiselectable="true" onKeyDown={handlePickerListboxKeyDown}>
                   {projectLoading ? (
                     <div className="flex items-center justify-center gap-2 p-4 text-sm text-gray-500 dark:text-gray-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Loading repos...
                     </div>
                   ) : projectError ? (
-                    <div className="p-4 text-sm text-rose-700 dark:text-rose-300">
+                    <div className="p-4 text-sm text-rose-700 dark:text-rose-300" role="alert">
                       {projectError}
                     </div>
                   ) : projectOptions.length === 0 ? (
@@ -578,6 +619,8 @@ export default function LegacyMergeTrainWatcher({
                         <button
                           key={project.id}
                           type="button"
+                          role="option"
+                          aria-selected={selected}
                           onClick={() => handleProjectToggle(project)}
                           className={`flex w-full items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:border-neutral-700 dark:hover:bg-neutral-700 dark:focus:bg-neutral-700 ${
                             selected ? 'bg-violet-50 dark:bg-violet-950/20' : ''
@@ -743,4 +786,3 @@ export default function LegacyMergeTrainWatcher({
     </section>
   );
 }
-

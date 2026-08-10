@@ -27,9 +27,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Cloudflare Web Analytics */}
-        <Script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "16dcad88fd6b4295a51b28c70ca3c237"}' strategy="afterInteractive"></Script>
-        {/* End Cloudflare Web Analytics */}
+        {process.env.NODE_ENV === "production" ? (
+          <Script
+            defer
+            src="https://static.cloudflareinsights.com/beacon.min.js"
+            data-cf-beacon='{"token": "16dcad88fd6b4295a51b28c70ca3c237"}'
+            strategy="afterInteractive"
+          />
+        ) : null}
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

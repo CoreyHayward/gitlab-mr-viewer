@@ -5,6 +5,7 @@ import { GitLabService } from '@/services/gitlab';
 import { DEFAULT_AI_API_BASE_URL, DEFAULT_AI_MODEL } from '@/review/ai';
 import { clearAiProviderConfig, readAiProviderConfig, writeAiProviderConfig } from '@/review/storage';
 import type { AiProviderConfig } from '@/review/types';
+import { buildAiProviderConfig, normaliseUrl, validateGitLabInstanceUrl } from '@/utils/connectionConfig';
 
 interface ConfigFormProps {
   onConfigured: (service: GitLabService, aiConfig: AiProviderConfig | null) => void;
@@ -25,6 +26,8 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
 
   // Load saved credentials on component mount
   useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
     const savedInstanceUrl = localStorage.getItem('gitlab-instance-url');
     const savedToken = localStorage.getItem('gitlab-token');
     const savedAiConfig = readAiProviderConfig();
@@ -43,19 +46,39 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
     }
 
     if (savedToken) {
-      setToken(savedToken);
-      // Auto-connect if we have saved credentials
-      const service = new GitLabService(savedInstanceUrl || 'https://gitlab.com', savedToken);
-      service.testConnection().then(result => {
-        if (result.success) {
-          onConfigured(service, savedAiConfig);
-        }
-      }).catch(() => {
-        // If auto-connect fails, clear saved token and let user re-enter
+      const restoredInstanceUrl = savedInstanceUrl || 'https://gitlab.com';
+      const instanceError = validateGitLabInstanceUrl(restoredInstanceUrl);
+      if (instanceError) {
         localStorage.removeItem('gitlab-token');
-        setToken('');
-      });
+        setError('The saved GitLab instance URL is invalid. Enter the connection again.');
+      } else {
+        setToken(savedToken);
+        setIsValidating(true);
+        const service = new GitLabService(restoredInstanceUrl, savedToken);
+        void service.testConnection(controller.signal).then(result => {
+          if (!active) return;
+          if (result.success) {
+            onConfigured(service, savedAiConfig);
+            return;
+          }
+          localStorage.removeItem('gitlab-token');
+          setToken('');
+          setError(result.error || 'The saved GitLab token is no longer valid. Enter a replacement token.');
+        }).catch((validationError) => {
+          if (!active || controller.signal.aborted) return;
+          localStorage.removeItem('gitlab-token');
+          setToken('');
+          setError(validationError instanceof Error ? validationError.message : 'The saved GitLab connection could not be restored.');
+        }).finally(() => {
+          if (active) setIsValidating(false);
+        });
+      }
     }
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [onConfigured]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -64,36 +87,37 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
     setError(null);
 
     try {
-      const service = new GitLabService(instanceUrl, token);
+      const normalizedInstanceUrl = normaliseUrl(instanceUrl);
+      const normalizedToken = token.trim();
+      const instanceError = validateGitLabInstanceUrl(normalizedInstanceUrl);
+      if (instanceError) {
+        setError(instanceError);
+        return;
+      }
+      if (!normalizedToken) {
+        setError('Enter a GitLab personal access token.');
+        return;
+      }
+      const aiResult = buildAiProviderConfig(
+        aiEnabled,
+        aiApiKey,
+        aiModel,
+        showCustomAiUrl ? aiApiBaseUrl : DEFAULT_AI_API_BASE_URL
+      );
+      if (aiResult.error) {
+        setError(aiResult.error);
+        return;
+      }
+      const service = new GitLabService(normalizedInstanceUrl, normalizedToken);
       const result = await service.testConnection();
       
       if (result.success) {
-        let aiConfig: AiProviderConfig | null = null;
-        if (aiEnabled) {
-          const normalizedKey = aiApiKey.trim();
-          const normalizedModel = aiModel.trim();
-          const normalizedBaseUrl = (showCustomAiUrl ? aiApiBaseUrl : DEFAULT_AI_API_BASE_URL).trim().replace(/\/+$/, '');
-          if (!normalizedKey) {
-            setError('Enter an AI API key or turn off AI-assisted reviewing.');
-            return;
-          }
-          if (!normalizedModel) {
-            setError('Enter an AI model name supported by your provider.');
-            return;
-          }
-          try {
-            new URL(normalizedBaseUrl);
-          } catch {
-            setError('Enter a valid OpenAI-compatible AI API URL.');
-            return;
-          }
-          aiConfig = { apiKey: normalizedKey, model: normalizedModel, apiBaseUrl: normalizedBaseUrl };
-        }
+        const aiConfig = aiResult.config;
 
         // Save credentials to localStorage if remember me is checked
         if (rememberMe) {
-          localStorage.setItem('gitlab-instance-url', instanceUrl);
-          localStorage.setItem('gitlab-token', token);
+          localStorage.setItem('gitlab-instance-url', normalizedInstanceUrl);
+          localStorage.setItem('gitlab-token', normalizedToken);
         } else {
           // Clear saved credentials if user unchecked remember me
           localStorage.removeItem('gitlab-instance-url');
@@ -240,7 +264,7 @@ export default function ConfigForm({ onConfigured }: ConfigFormProps) {
         </div>
 
         {error && (
-          <div className="p-3 bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 rounded-md">
+          <div className="p-3 bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 rounded-md" role="alert">
             {error}
           </div>
         )}

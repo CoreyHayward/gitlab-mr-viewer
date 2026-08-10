@@ -1,11 +1,18 @@
 'use client';
 
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Eye, EyeOff, KeyRound, Loader2, LogOut, Settings2, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AI_API_BASE_URL, DEFAULT_AI_MODEL } from '@/review/ai';
 import { readAiProviderConfig } from '@/review/storage';
 import type { AiProviderConfig } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
+import { useDialogFocus } from '@/hooks/useDialogFocus';
+import {
+  buildAiProviderConfig,
+  isCustomAiEndpoint,
+  normaliseUrl,
+  validateGitLabInstanceUrl
+} from '@/utils/connectionConfig';
 
 interface ConnectionSettingsModalProps {
   service: GitLabService;
@@ -20,9 +27,6 @@ interface ConnectionSettingsModalProps {
   ) => void;
   onDisconnect: () => void;
 }
-
-const normaliseUrl = (value: string) => value.trim().replace(/\/+$/, '');
-const isCustomEndpoint = (baseUrl: string) => normaliseUrl(baseUrl) !== DEFAULT_AI_API_BASE_URL;
 
 export default function ConnectionSettingsModal({
   service,
@@ -41,20 +45,13 @@ export default function ConnectionSettingsModal({
   const [aiApiKey, setAiApiKey] = useState(aiConfig?.apiKey ?? '');
   const [aiModel, setAiModel] = useState(aiConfig?.model ?? DEFAULT_AI_MODEL);
   const [aiApiBaseUrl, setAiApiBaseUrl] = useState(aiConfig?.apiBaseUrl ?? DEFAULT_AI_API_BASE_URL);
-  const [showCustomAiUrl, setShowCustomAiUrl] = useState(aiConfig ? isCustomEndpoint(aiConfig.apiBaseUrl) : false);
+  const [showCustomAiUrl, setShowCustomAiUrl] = useState(aiConfig ? isCustomAiEndpoint(aiConfig.apiBaseUrl) : false);
   const [rememberAiSettings, setRememberAiSettings] = useState(() => Boolean(readAiProviderConfig()));
   const [showGitLabToken, setShowGitLabToken] = useState(false);
   const [showAiToken, setShowAiToken] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isValidating) onClose();
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [isValidating, onClose]);
+  const dialogRef = useDialogFocus<HTMLFormElement>(true, onClose, !isValidating);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -66,14 +63,9 @@ export default function ConnectionSettingsModal({
     const instanceChanged = normalizedInstanceUrl !== normalizedCurrentInstanceUrl;
     const connectionChanged = instanceChanged || Boolean(normalizedToken);
 
-    if (!normalizedInstanceUrl) {
-      setError('Enter a GitLab instance URL.');
-      return;
-    }
-    try {
-      new URL(normalizedInstanceUrl);
-    } catch {
-      setError('Enter a valid GitLab instance URL.');
+    const instanceError = validateGitLabInstanceUrl(normalizedInstanceUrl);
+    if (instanceError) {
+      setError(instanceError);
       return;
     }
     if (instanceChanged && !normalizedToken) {
@@ -81,32 +73,17 @@ export default function ConnectionSettingsModal({
       return;
     }
 
-    let nextAiConfig: AiProviderConfig | null = null;
-    if (aiEnabled) {
-      const normalizedAiKey = aiApiKey.trim();
-      const normalizedModel = aiModel.trim();
-      const normalizedAiBaseUrl = normaliseUrl(showCustomAiUrl ? aiApiBaseUrl : DEFAULT_AI_API_BASE_URL);
-
-      if (!normalizedAiKey) {
-        setError('Enter an AI API key or turn off AI-assisted semantic reviews.');
-        return;
-      }
-      if (!normalizedModel) {
-        setError('Enter an AI model name supported by your provider.');
-        return;
-      }
-      try {
-        new URL(normalizedAiBaseUrl);
-      } catch {
-        setError('Enter a valid OpenAI-compatible AI API URL.');
-        return;
-      }
-      nextAiConfig = {
-        apiKey: normalizedAiKey,
-        model: normalizedModel,
-        apiBaseUrl: normalizedAiBaseUrl
-      };
+    const aiResult = buildAiProviderConfig(
+      aiEnabled,
+      aiApiKey,
+      aiModel,
+      showCustomAiUrl ? aiApiBaseUrl : DEFAULT_AI_API_BASE_URL
+    );
+    if (aiResult.error) {
+      setError(aiResult.error);
+      return;
     }
+    const nextAiConfig = aiResult.config;
 
     let nextService = service;
     if (connectionChanged) {
@@ -147,13 +124,13 @@ export default function ConnectionSettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="connection-settings-title">
-      <form onSubmit={submit} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-[#f7f7f5] shadow-2xl dark:border-white/10 dark:bg-[#10131b]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="connection-settings-title" aria-describedby="connection-settings-description">
+      <form ref={dialogRef} tabIndex={-1} onSubmit={submit} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-[#f7f7f5] shadow-2xl outline-none dark:border-white/10 dark:bg-[#10131b]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-white/10">
           <div>
             <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300"><Settings2 className="h-4 w-4" /><span className="text-xs font-bold uppercase tracking-[0.16em]">Connection</span></div>
             <h2 id="connection-settings-title" className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Connection settings</h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update GitLab or optional AI credentials without leaving your current workspace.</p>
+            <p id="connection-settings-description" className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update GitLab or optional AI credentials without leaving your current workspace.</p>
           </div>
           <button type="button" onClick={onClose} disabled={isValidating} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-white" aria-label="Close connection settings"><X className="h-5 w-5" /></button>
         </div>
@@ -171,7 +148,7 @@ export default function ConnectionSettingsModal({
             <div className="mt-4 space-y-3">
               <label className="block">
                 <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-200">GitLab instance URL</span>
-                <input type="url" value={instanceUrl} onChange={(event) => setInstanceUrl(event.target.value)} placeholder="https://gitlab.com" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" />
+                <input data-dialog-autofocus type="url" value={instanceUrl} onChange={(event) => setInstanceUrl(event.target.value)} placeholder="https://gitlab.com" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-white/15 dark:bg-white/[0.05] dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/20" />
               </label>
 
               <label className="block">
@@ -233,7 +210,7 @@ export default function ConnectionSettingsModal({
             )}
           </section>
 
-          {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">{error}</p>}
+          {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100" role="alert">{error}</p>}
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4 dark:border-white/10">
