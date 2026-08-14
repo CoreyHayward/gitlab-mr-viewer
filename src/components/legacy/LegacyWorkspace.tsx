@@ -141,8 +141,8 @@ export default function LegacyWorkspace({
 
   const customQuickFilterClassName = (filter: CustomQuickFilter) => `inline-flex max-w-full items-center rounded-full border text-sm font-medium transition-colors ${
     activeCustomQuickFilterId === filter.id
-      ? 'border-indigo-200 bg-indigo-100 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200'
-      : 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40'
+      ? 'border-gray-400 bg-gray-100 text-gray-900 dark:border-neutral-500 dark:bg-neutral-700 dark:text-white'
+      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700'
   }`;
 
   const openCustomQuickFilterForm = () => {
@@ -240,11 +240,11 @@ export default function LegacyWorkspace({
                 <button type="button" onClick={() => onQuickFilterToggle('not-reviewed-by-me')} disabled={!currentUser} className={`${quickFilterClassName('not-reviewed-by-me', 'border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-200')} ${!currentUser ? 'cursor-not-allowed opacity-60' : ''}`}><Eye className="mr-2 h-4 w-4" />Not approved by me</button>
                 {customQuickFilters.map((customFilter) => (
                   <div key={customFilter.id} className={customQuickFilterClassName(customFilter)} title={customFilter.name}>
-                    <button type="button" onClick={() => onApplyCustomQuickFilter(customFilter)} className="inline-flex min-w-0 items-center gap-2 rounded-l-full py-1.5 pl-3 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+                    <button type="button" onClick={() => onApplyCustomQuickFilter(customFilter)} className="inline-flex min-w-0 items-center gap-2 rounded-l-full py-1.5 pl-3 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-neutral-500">
                       <Bookmark className="h-4 w-4 shrink-0" />
                       <span className="max-w-48 truncate">{customFilter.name}</span>
                     </button>
-                    <button type="button" onClick={() => onRemoveCustomQuickFilter(customFilter.id)} aria-label={`Delete custom filter ${customFilter.name}`} className="rounded-r-full p-1.5 opacity-70 transition-opacity hover:bg-black/5 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-white/10">
+                    <button type="button" onClick={() => onRemoveCustomQuickFilter(customFilter.id)} aria-label={`Delete custom filter ${customFilter.name}`} className="rounded-r-full p-1.5 opacity-70 transition-opacity hover:bg-black/5 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-neutral-500 dark:hover:bg-white/10">
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -254,10 +254,10 @@ export default function LegacyWorkspace({
             )}
 
             {!error && isSavingCustomQuickFilter && (
-              <form onSubmit={saveCurrentCustomQuickFilter} className="mb-4 flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-950/20 sm:flex-row sm:items-end">
+              <form onSubmit={saveCurrentCustomQuickFilter} className="mb-4 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-800 sm:flex-row sm:items-end">
                 <div className="min-w-0 flex-1">
-                  <label htmlFor="custom-quick-filter-name" className="block text-sm font-semibold text-indigo-900 dark:text-indigo-100">Name this filter</label>
-                  <p className="mt-1 text-xs text-indigo-800/80 dark:text-indigo-200/80">The current URL filter state will be saved in this browser.</p>
+                  <label htmlFor="custom-quick-filter-name" className="block text-sm font-semibold text-gray-900 dark:text-white">Name this filter</label>
+                  <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">The current URL filter state will be saved in this browser.</p>
                   <input
                     id="custom-quick-filter-name"
                     type="text"
@@ -269,13 +269,13 @@ export default function LegacyWorkspace({
                     maxLength={MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH}
                     placeholder="e.g. Backend MRs awaiting review"
                     autoFocus
-                    className="mt-2 w-full rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-indigo-700 dark:bg-neutral-800 dark:text-white dark:focus:ring-indigo-900/50"
+                    className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:border-neutral-600 dark:bg-neutral-800 dark:text-white dark:focus:ring-neutral-700"
                   />
                   {customQuickFilterError && <p className="mt-1 text-xs font-medium text-red-700 dark:text-red-300" role="alert">{customQuickFilterError}</p>}
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <button type="submit" className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-900">Save filter</button>
-                  <button type="button" onClick={closeCustomQuickFilterForm} className="inline-flex items-center justify-center rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm font-medium text-indigo-900 transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-700 dark:bg-neutral-800 dark:text-indigo-100 dark:hover:bg-indigo-900/40 dark:focus:ring-offset-neutral-900">Cancel</button>
+                  <button type="submit" className="inline-flex items-center justify-center rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:bg-gray-200 dark:text-gray-900 dark:hover:bg-white dark:focus:ring-gray-400 dark:focus:ring-offset-neutral-900">Save filter</button>
+                  <button type="button" onClick={closeCustomQuickFilterForm} className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700 dark:focus:ring-neutral-500 dark:focus:ring-offset-neutral-900">Cancel</button>
                 </div>
               </form>
             )}
