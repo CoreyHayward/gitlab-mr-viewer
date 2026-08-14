@@ -26,6 +26,14 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+.desktop-drag-region {
+  -webkit-app-region: drag;
+}
+
+.desktop-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* Keep scrollable surfaces quiet and consistent across the app. */
 * {
   scrollbar-color: var(--scrollbar-thumb) transparent;

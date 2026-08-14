@@ -1,15 +1,49 @@
-# GitLab MR Viewer
+# ReviewFlow / GitLab MR Viewer
 
-A static, client-side workspace for finding GitLab merge requests, monitoring merge trains, and reviewing changed code. It supports GitLab.com and self-managed instances whose API permits browser requests.
+ReviewFlow now has two modes:
+
+- a native macOS review studio that uses the GitLab, Codex, and Claude Code CLIs already authenticated on your Mac;
+- the original static, client-side GitLab workspace for finding merge requests, monitoring merge trains, and reviewing changed code in a browser.
 
 This project began as an experiment with agentic development tools and remains a practical personal/team utility.
 
-## What it does
+## Native macOS app
+
+The desktop app provides a focused review-request dashboard, local filters, exact-ref managed worktrees, a guided semantic walkthrough, private notes and progress, repository-aware Q&A, and an optional automated pass that proposes evidence-backed candidate findings for human verification.
+
+GitLab is implemented through a provider-neutral source-control adapter. The contracts, settings UI, review references, repository manager, and persistence layer already reserve GitHub as the next adapter; GitHub is visible but intentionally disabled until that implementation ships. See [the desktop architecture](docs/desktop-architecture.md).
+
+Requirements:
+
+- Apple Silicon Mac and Node.js 20 or newer for this unsigned MVP build;
+- `glab` installed and authenticated for the GitLab host (`glab auth login --hostname gitlab.com`);
+- Codex and/or Claude Code installed, with at least one authenticated (`codex login` or `claude auth login`).
+
+Run the native app in development:
+
+```bash
+npm ci
+npm run desktop:dev
+```
+
+Build an unsigned local `.app`:
+
+```bash
+npm run desktop:package
+open release/mac-arm64/ReviewFlow.app
+```
+
+`desktop:package` creates an unpacked app for local use. `desktop:dist` creates unsigned DMG and ZIP artifacts. Signing, notarization, Intel builds, and distribution hardening are intentionally outside the MVP.
+
+ReviewFlow creates repositories and detached worktrees only inside its own macOS application-data directory. It does not touch an existing checkout. Agent runs are constrained to read-only repository access, and the desktop MVP never posts comments, approves, merges, or edits code automatically.
+
+## Web app capabilities
 
 - Lists merge requests progressively across projects the current user belongs to, or within one or more selected projects, without relying on GitLab's expensive unfiltered instance-wide `scope=all` query.
 - Loads paginated results on demand, preserves successful results when one GitLab request fails, and identifies partial data in the UI.
 - Filters by state, approval state, author, exact project name/path, title inclusion/exclusion, draft status, and created/merged dates.
 - Provides quick views for your open MRs, MRs needing approval, MRs you have not approved, and recently merged MRs.
+- Lets you save named custom quick filters from the current URL state, then reuse or delete them from the quick-filter row.
 - Shares the current project/filter/review location through the URL and supports manual or idle one-minute refresh.
 - Monitors active merge trains for a separately saved set of projects, including a visible train-yard view.
 - Opens a guided review that groups related files, tracks private notes and review status, highlights new commits, and exposes incomplete GitLab diffs instead of hiding them.
@@ -86,6 +120,7 @@ The provider receives bounded portions of the MR title, description, changed pat
 - GitLab and optional AI calls go directly from the browser to the configured provider.
 - Tokens remain in memory unless you choose to remember them in browser local storage.
 - Saved review state and merge-train selections stay in browser local storage, namespaced by instance and user.
+- Custom quick filters stay in browser local storage, scoped by GitLab instance and user.
 - Disconnect clears saved GitLab and AI credentials; local review progress remains available for that same scoped account.
 - This client-only model is best suited to a trusted device and restricted personal tokens.
 

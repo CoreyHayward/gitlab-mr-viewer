@@ -20,6 +20,14 @@ import {
 } from '@/utils/urlState';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useMergeRequestResults } from '@/hooks/useMergeRequestResults';
+import DesktopApp from '@/components/desktop/DesktopApp';
+import {
+  addCustomQuickFilter,
+  getCurrentFilterURL,
+  loadCustomQuickFilters,
+  removeCustomQuickFilter,
+  type CustomQuickFilter
+} from '@/utils/customQuickFilters';
 
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const AUTO_REFRESH_ENABLED_KEY = 'gitlab-mr-viewer-auto-refresh-enabled';
@@ -50,6 +58,20 @@ const applyQuickFilter = (
 };
 
 export default function HomeContent() {
+  const [desktopMode, setDesktopMode] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    setDesktopMode(Boolean(window.reviewflowDesktop));
+  }, []);
+
+  if (desktopMode === null) {
+    return <div className="min-h-screen bg-[#0b0d12]" aria-label="Opening ReviewFlow" />;
+  }
+
+  return desktopMode ? <DesktopApp /> : <WebHomeContent />;
+}
+
+function WebHomeContent() {
   const [service, setService] = useState<GitLabService | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<GitLabProject[]>([]);
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });
@@ -65,9 +87,14 @@ export default function HomeContent() {
   const [reviewingMergeRequest, setReviewingMergeRequest] = useState<GitLabMergeRequest | null>(null);
   const [guidedReviewLocation, setGuidedReviewLocation] = useState<GuidedReviewLocation | null>(null);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [customQuickFilters, setCustomQuickFilters] = useState<CustomQuickFilter[]>([]);
+  const [activeCustomQuickFilterId, setActiveCustomQuickFilterId] = useState<string | null>(null);
 
   const reviewLookupControllerRef = useRef<AbortController | null>(null);
   const reviewLookupKeyRef = useRef<string | null>(null);
+  const customQuickFilterScope = service && currentUser
+    ? `${service.getInstanceUrl()}|${currentUser.id}`
+    : null;
   const debouncedFilters = useDebouncedValue(filters, 300);
   const effectiveFilters = useMemo(
     () => applyQuickFilter(debouncedFilters, quickFilter, currentUser),
@@ -93,6 +120,7 @@ export default function HomeContent() {
     const { filters: urlFilters, projectIds, guidedReview } = decodeFiltersFromURL(new URLSearchParams(window.location.search));
     setFilters(urlFilters);
     setQuickFilter(null);
+    setActiveCustomQuickFilterId(null);
     setInitialProjectIds(projectIds ?? []);
     if (!projectIds || projectIds.length === 0) setSelectedProjects([]);
     setGuidedReviewLocation(guidedReview);
@@ -100,6 +128,16 @@ export default function HomeContent() {
     setProjectResolutionWarnings([]);
     setNavigationError(null);
   }, []);
+
+  useEffect(() => {
+    if (!customQuickFilterScope) {
+      setCustomQuickFilters([]);
+      setActiveCustomQuickFilterId(null);
+      return;
+    }
+
+    setCustomQuickFilters(loadCustomQuickFilters(customQuickFilterScope));
+  }, [customQuickFilterScope]);
 
   useEffect(() => {
     applyURLState();
@@ -242,11 +280,12 @@ export default function HomeContent() {
   }, []);
 
   useEffect(() => {
-    if (!service || initialProjectIds === null) return;
+    if (!service || initialProjectIds === null || initialProjectIds.length > 0) return;
     updateURL(effectiveFilters, selectedProjects.map((project) => project.id));
   }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
 
   const handleProjectsChange = (projects: GitLabProject[]) => {
+    setActiveCustomQuickFilterId(null);
     setSelectedProjects(projects);
     setProjectResolutionWarnings([]);
     setInitialProjectIds([]);
@@ -312,13 +351,41 @@ export default function HomeContent() {
   }, [resetMergeRequestResults]);
 
   const handleFiltersChange = (nextFilters: FilterOptions) => {
+    setActiveCustomQuickFilterId(null);
     setQuickFilter(null);
     setFilters(nextFilters);
   };
 
   const handleQuickFilterToggle = (filter: LegacyQuickFilter) => {
+    setActiveCustomQuickFilterId(null);
     setQuickFilter((current) => current === filter ? null : filter);
   };
+
+  const handleApplyCustomQuickFilter = useCallback((customFilter: CustomQuickFilter) => {
+    const url = new URL(window.location.href);
+    url.search = customFilter.url;
+    url.hash = '';
+    window.history.replaceState(window.history.state, '', url.toString());
+    applyURLState();
+    setActiveCustomQuickFilterId(customFilter.id);
+  }, [applyURLState]);
+
+  const handleSaveCustomQuickFilter = useCallback((name: string) => {
+    if (!customQuickFilterScope) return false;
+    const nextFilters = addCustomQuickFilter(customQuickFilterScope, name, getCurrentFilterURL());
+    if (!nextFilters) return false;
+    setCustomQuickFilters(nextFilters);
+    setActiveCustomQuickFilterId(nextFilters[0]?.id ?? null);
+    return true;
+  }, [customQuickFilterScope]);
+
+  const handleRemoveCustomQuickFilter = useCallback((id: string) => {
+    if (!customQuickFilterScope) return;
+    const nextFilters = removeCustomQuickFilter(customQuickFilterScope, id);
+    if (!nextFilters) return;
+    setCustomQuickFilters(nextFilters);
+    setActiveCustomQuickFilterId((current) => current === id ? null : current);
+  }, [customQuickFilterScope]);
 
   const handleRefresh = () => {
     service?.clearApprovalCache();
@@ -406,6 +473,12 @@ export default function HomeContent() {
         onProjectsChange={handleProjectsChange}
         filters={filters}
         onFiltersChange={handleFiltersChange}
+        customQuickFilters={customQuickFilters}
+        activeCustomQuickFilterId={activeCustomQuickFilterId}
+        canSaveCustomQuickFilters={customQuickFilterScope !== null}
+        onApplyCustomQuickFilter={handleApplyCustomQuickFilter}
+        onSaveCustomQuickFilter={handleSaveCustomQuickFilter}
+        onRemoveCustomQuickFilter={handleRemoveCustomQuickFilter}
         mergeRequests={mergeRequests}
         loading={loading}
         loadingMore={loadingMore}

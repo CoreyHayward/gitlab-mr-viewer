@@ -6,7 +6,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 const config = {
   resolve: {
     alias: {
-      '@': resolve(root, 'src')
+      '@': resolve(root, 'src'),
+      '@desktop': resolve(root, 'desktop')
     }
   },
   test: {

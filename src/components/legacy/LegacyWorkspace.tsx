@@ -1,7 +1,7 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Eye, GitBranch, History, Link, Search, Settings2, TriangleAlert, User, X } from 'lucide-react';
+import { Bookmark, Eye, GitBranch, History, Link, Search, Settings2, TriangleAlert, User, X } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
@@ -10,6 +10,7 @@ import MergeRequestList from '@/components/MergeRequestList';
 import LegacyFilterPanel from './LegacyFilterPanel';
 import LegacyMergeTrainWatcher from './LegacyMergeTrainWatcher';
 import LegacyProjectSelector from './LegacyProjectSelector';
+import { MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH, type CustomQuickFilter } from '@/utils/customQuickFilters';
 
 export type LegacyQuickFilter = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
 
@@ -37,6 +38,12 @@ interface LegacyWorkspaceProps {
   onProjectsChange: (projects: GitLabProject[]) => void;
   filters: FilterOptions;
   onFiltersChange: (filters: FilterOptions) => void;
+  customQuickFilters: CustomQuickFilter[];
+  activeCustomQuickFilterId: string | null;
+  canSaveCustomQuickFilters: boolean;
+  onApplyCustomQuickFilter: (filter: CustomQuickFilter) => void;
+  onSaveCustomQuickFilter: (name: string) => boolean;
+  onRemoveCustomQuickFilter: (id: string) => void;
   mergeRequests: GitLabMergeRequest[];
   loading: boolean;
   loadingMore: boolean;
@@ -63,6 +70,12 @@ export default function LegacyWorkspace({
   onProjectsChange,
   filters,
   onFiltersChange,
+  customQuickFilters,
+  activeCustomQuickFilterId,
+  canSaveCustomQuickFilters,
+  onApplyCustomQuickFilter,
+  onSaveCustomQuickFilter,
+  onRemoveCustomQuickFilter,
   mergeRequests,
   loading,
   loadingMore,
@@ -86,6 +99,9 @@ export default function LegacyWorkspace({
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
   const [mergeTrainWatcherTrainMode, setMergeTrainWatcherTrainMode] = useState(false);
   const [mergeRequestSearch, setMergeRequestSearch] = useState('');
+  const [isSavingCustomQuickFilter, setIsSavingCustomQuickFilter] = useState(false);
+  const [customQuickFilterName, setCustomQuickFilterName] = useState('');
+  const [customQuickFilterError, setCustomQuickFilterError] = useState<string | null>(null);
   const deferredMergeRequestSearch = useDeferredValue(mergeRequestSearch);
 
   const isMergeRequestSearchActive = deferredMergeRequestSearch.trim().length > 0;
@@ -122,6 +138,38 @@ export default function LegacyWorkspace({
       ? activeClassName
       : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700'
   }`;
+
+  const customQuickFilterClassName = (filter: CustomQuickFilter) => `inline-flex max-w-full items-center rounded-full border text-sm font-medium transition-colors ${
+    activeCustomQuickFilterId === filter.id
+      ? 'border-indigo-200 bg-indigo-100 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200'
+      : 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-900/40'
+  }`;
+
+  const openCustomQuickFilterForm = () => {
+    setCustomQuickFilterError(null);
+    setCustomQuickFilterName('');
+    setIsSavingCustomQuickFilter(true);
+  };
+
+  const closeCustomQuickFilterForm = () => {
+    setCustomQuickFilterError(null);
+    setCustomQuickFilterName('');
+    setIsSavingCustomQuickFilter(false);
+  };
+
+  const saveCurrentCustomQuickFilter = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = customQuickFilterName.trim();
+    if (!name) {
+      setCustomQuickFilterError('Enter a name for this filter.');
+      return;
+    }
+    if (!onSaveCustomQuickFilter(name)) {
+      setCustomQuickFilterError('This filter could not be saved in browser storage.');
+      return;
+    }
+    closeCustomQuickFilterForm();
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-neutral-900">
@@ -185,12 +233,51 @@ export default function LegacyWorkspace({
             )}
 
             {!error && (
-              <div className="mb-4 flex flex-wrap gap-2">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => onQuickFilterToggle('my-open-prs')} disabled={!currentUser} className={`${quickFilterClassName('my-open-prs', 'border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200')} ${!currentUser ? 'cursor-not-allowed opacity-60' : ''}`}><User className="mr-2 h-4 w-4" />My Open MRs</button>
                 <button type="button" onClick={() => onQuickFilterToggle('needs-approval')} className={quickFilterClassName('needs-approval', 'border-rose-200 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-200')}><TriangleAlert className="mr-2 h-4 w-4" />Needs approval</button>
                 <button type="button" onClick={() => onQuickFilterToggle('recently-merged-prs')} className={quickFilterClassName('recently-merged-prs', 'border-violet-200 bg-violet-100 text-violet-800 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-200')}><History className="mr-2 h-4 w-4" />Recently merged MRs</button>
                 <button type="button" onClick={() => onQuickFilterToggle('not-reviewed-by-me')} disabled={!currentUser} className={`${quickFilterClassName('not-reviewed-by-me', 'border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-200')} ${!currentUser ? 'cursor-not-allowed opacity-60' : ''}`}><Eye className="mr-2 h-4 w-4" />Not approved by me</button>
+                {customQuickFilters.map((customFilter) => (
+                  <div key={customFilter.id} className={customQuickFilterClassName(customFilter)} title={customFilter.name}>
+                    <button type="button" onClick={() => onApplyCustomQuickFilter(customFilter)} className="inline-flex min-w-0 items-center gap-2 rounded-l-full py-1.5 pl-3 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+                      <Bookmark className="h-4 w-4 shrink-0" />
+                      <span className="max-w-48 truncate">{customFilter.name}</span>
+                    </button>
+                    <button type="button" onClick={() => onRemoveCustomQuickFilter(customFilter.id)} aria-label={`Delete custom filter ${customFilter.name}`} className="rounded-r-full p-1.5 opacity-70 transition-opacity hover:bg-black/5 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-white/10">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={openCustomQuickFilterForm} disabled={!canSaveCustomQuickFilters} aria-label="Save current filter" title="Save current filter" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-lg font-medium leading-none text-gray-700 shadow-sm transition-colors hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-200 dark:hover:border-neutral-500 dark:hover:bg-neutral-700">+</button>
               </div>
+            )}
+
+            {!error && isSavingCustomQuickFilter && (
+              <form onSubmit={saveCurrentCustomQuickFilter} className="mb-4 flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-950/20 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <label htmlFor="custom-quick-filter-name" className="block text-sm font-semibold text-indigo-900 dark:text-indigo-100">Name this filter</label>
+                  <p className="mt-1 text-xs text-indigo-800/80 dark:text-indigo-200/80">The current URL filter state will be saved in this browser.</p>
+                  <input
+                    id="custom-quick-filter-name"
+                    type="text"
+                    value={customQuickFilterName}
+                    onChange={(event) => {
+                      setCustomQuickFilterName(event.target.value);
+                      setCustomQuickFilterError(null);
+                    }}
+                    maxLength={MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH}
+                    placeholder="e.g. Backend MRs awaiting review"
+                    autoFocus
+                    className="mt-2 w-full rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-indigo-700 dark:bg-neutral-800 dark:text-white dark:focus:ring-indigo-900/50"
+                  />
+                  {customQuickFilterError && <p className="mt-1 text-xs font-medium text-red-700 dark:text-red-300" role="alert">{customQuickFilterError}</p>}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button type="submit" className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-900">Save filter</button>
+                  <button type="button" onClick={closeCustomQuickFilterForm} className="inline-flex items-center justify-center rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm font-medium text-indigo-900 transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-700 dark:bg-neutral-800 dark:text-indigo-100 dark:hover:bg-indigo-900/40 dark:focus:ring-offset-neutral-900">Cancel</button>
+                </div>
+              </form>
             )}
 
             {!error && (
