@@ -92,6 +92,7 @@ function WebHomeContent() {
 
   const reviewLookupControllerRef = useRef<AbortController | null>(null);
   const reviewLookupKeyRef = useRef<string | null>(null);
+  const customQuickFilterPreviousURLRef = useRef<string | null>(null);
   const customQuickFilterScope = service && currentUser
     ? `${service.getInstanceUrl()}|${currentUser.id}`
     : null;
@@ -116,11 +117,12 @@ function WebHomeContent() {
     enabled: initialProjectIds !== null && initialProjectIds.length === 0
   });
 
-  const applyURLState = useCallback(() => {
+  const applyURLState = useCallback((preserveCustomQuickFilterState = false) => {
     const { filters: urlFilters, projectIds, guidedReview } = decodeFiltersFromURL(new URLSearchParams(window.location.search));
     setFilters(urlFilters);
     setQuickFilter(null);
     setActiveCustomQuickFilterId(null);
+    if (!preserveCustomQuickFilterState) customQuickFilterPreviousURLRef.current = null;
     setInitialProjectIds(projectIds ?? []);
     if (!projectIds || projectIds.length === 0) setSelectedProjects([]);
     setGuidedReviewLocation(guidedReview);
@@ -143,8 +145,9 @@ function WebHomeContent() {
     applyURLState();
     setAutoRefreshEnabled(localStorage.getItem(AUTO_REFRESH_ENABLED_KEY) === 'true');
 
-    window.addEventListener('popstate', applyURLState);
-    return () => window.removeEventListener('popstate', applyURLState);
+    const handlePopState = () => applyURLState();
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [applyURLState]);
 
   useEffect(() => {
@@ -285,6 +288,7 @@ function WebHomeContent() {
   }, [effectiveFilters, initialProjectIds, selectedProjects, service]);
 
   const handleProjectsChange = (projects: GitLabProject[]) => {
+    customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId(null);
     setSelectedProjects(projects);
     setProjectResolutionWarnings([]);
@@ -337,6 +341,7 @@ function WebHomeContent() {
       setNavigationError(null);
 
       if (instanceChanged) {
+        customQuickFilterPreviousURLRef.current = null;
         setSelectedProjects([]);
         setFilters({ state: 'opened' });
         setQuickFilter(null);
@@ -351,31 +356,46 @@ function WebHomeContent() {
   }, [resetMergeRequestResults]);
 
   const handleFiltersChange = (nextFilters: FilterOptions) => {
+    customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId(null);
     setQuickFilter(null);
     setFilters(nextFilters);
   };
 
   const handleQuickFilterToggle = (filter: LegacyQuickFilter) => {
+    customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId(null);
     setQuickFilter((current) => current === filter ? null : filter);
   };
 
   const handleApplyCustomQuickFilter = useCallback((customFilter: CustomQuickFilter) => {
+    if (activeCustomQuickFilterId === customFilter.id && customQuickFilterPreviousURLRef.current !== null) {
+      const previousURL = customQuickFilterPreviousURLRef.current;
+      customQuickFilterPreviousURLRef.current = null;
+      const url = new URL(window.location.href);
+      url.search = previousURL;
+      url.hash = '';
+      window.history.replaceState(window.history.state, '', url.toString());
+      applyURLState();
+      return;
+    }
+
+    if (activeCustomQuickFilterId === null) {
+      customQuickFilterPreviousURLRef.current = window.location.search;
+    }
     const url = new URL(window.location.href);
     url.search = customFilter.url;
     url.hash = '';
     window.history.replaceState(window.history.state, '', url.toString());
-    applyURLState();
+    applyURLState(true);
     setActiveCustomQuickFilterId(customFilter.id);
-  }, [applyURLState]);
+  }, [activeCustomQuickFilterId, applyURLState]);
 
   const handleSaveCustomQuickFilter = useCallback((name: string) => {
     if (!customQuickFilterScope) return false;
     const nextFilters = addCustomQuickFilter(customQuickFilterScope, name, getCurrentFilterURL());
     if (!nextFilters) return false;
     setCustomQuickFilters(nextFilters);
-    setActiveCustomQuickFilterId(nextFilters[0]?.id ?? null);
     return true;
   }, [customQuickFilterScope]);
 
@@ -384,8 +404,9 @@ function WebHomeContent() {
     const nextFilters = removeCustomQuickFilter(customQuickFilterScope, id);
     if (!nextFilters) return;
     setCustomQuickFilters(nextFilters);
+    if (activeCustomQuickFilterId === id) customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId((current) => current === id ? null : current);
-  }, [customQuickFilterScope]);
+  }, [activeCustomQuickFilterId, customQuickFilterScope]);
 
   const handleRefresh = () => {
     service?.clearApprovalCache();
@@ -417,6 +438,7 @@ function WebHomeContent() {
     setReviewingMergeRequest(null);
     setGuidedReviewLocation(null);
     setNavigationError(null);
+    customQuickFilterPreviousURLRef.current = null;
     setFilters({ state: 'opened' });
     setInitialProjectIds([]);
     localStorage.removeItem('gitlab-instance-url');
