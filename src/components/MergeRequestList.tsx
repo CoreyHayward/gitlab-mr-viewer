@@ -218,7 +218,7 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     };
   };
 
-  if (loading) {
+  if (loading && mergeRequests.length === 0) {
     return (
       <div className="space-y-6">
         {loadingMessage && (
@@ -278,7 +278,17 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" aria-busy={loading}>
+      {loading && loadingMessage && (
+        <div className="text-center" role="status" aria-live="polite">
+          <div className="inline-flex items-center space-x-3 rounded-xl border border-violet-200 bg-violet-50 px-6 py-4 dark:border-violet-800 dark:bg-violet-900/10">
+            <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
+            <span className="font-medium text-violet-700 dark:text-violet-300">
+              {loadingMessage}
+            </span>
+          </div>
+        </div>
+      )}
       {mergeRequests.map((mr) => (
         (() => {
           const reviewSummary = getApprovalSummary(mr);
