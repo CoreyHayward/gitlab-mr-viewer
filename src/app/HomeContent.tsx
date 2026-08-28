@@ -25,7 +25,9 @@ import {
   addCustomQuickFilter,
   getCurrentFilterURL,
   loadCustomQuickFilters,
+  loadQuickFilterOrder,
   removeCustomQuickFilter,
+  saveQuickFilterOrder,
   type CustomQuickFilter
 } from '@/utils/customQuickFilters';
 
@@ -89,6 +91,7 @@ function WebHomeContent() {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [customQuickFilters, setCustomQuickFilters] = useState<CustomQuickFilter[]>([]);
   const [activeCustomQuickFilterId, setActiveCustomQuickFilterId] = useState<string | null>(null);
+  const [quickFilterOrder, setQuickFilterOrder] = useState<string[]>([]);
 
   const reviewLookupControllerRef = useRef<AbortController | null>(null);
   const reviewLookupKeyRef = useRef<string | null>(null);
@@ -134,11 +137,13 @@ function WebHomeContent() {
   useEffect(() => {
     if (!customQuickFilterScope) {
       setCustomQuickFilters([]);
+      setQuickFilterOrder([]);
       setActiveCustomQuickFilterId(null);
       return;
     }
 
     setCustomQuickFilters(loadCustomQuickFilters(customQuickFilterScope));
+    setQuickFilterOrder(loadQuickFilterOrder(customQuickFilterScope));
   }, [customQuickFilterScope]);
 
   useEffect(() => {
@@ -404,9 +409,17 @@ function WebHomeContent() {
     const nextFilters = removeCustomQuickFilter(customQuickFilterScope, id);
     if (!nextFilters) return;
     setCustomQuickFilters(nextFilters);
+    const nextOrder = quickFilterOrder.filter((itemId) => itemId !== `custom:${id}`);
+    setQuickFilterOrder(nextOrder);
+    saveQuickFilterOrder(customQuickFilterScope, nextOrder);
     if (activeCustomQuickFilterId === id) customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId((current) => current === id ? null : current);
-  }, [activeCustomQuickFilterId, customQuickFilterScope]);
+  }, [activeCustomQuickFilterId, customQuickFilterScope, quickFilterOrder]);
+
+  const handleQuickFilterOrderChange = useCallback((nextOrder: string[]) => {
+    setQuickFilterOrder(nextOrder);
+    if (customQuickFilterScope) saveQuickFilterOrder(customQuickFilterScope, nextOrder);
+  }, [customQuickFilterScope]);
 
   const handleRefresh = () => {
     service?.clearApprovalCache();
@@ -501,6 +514,8 @@ function WebHomeContent() {
         onApplyCustomQuickFilter={handleApplyCustomQuickFilter}
         onSaveCustomQuickFilter={handleSaveCustomQuickFilter}
         onRemoveCustomQuickFilter={handleRemoveCustomQuickFilter}
+        quickFilterOrder={quickFilterOrder}
+        onQuickFilterOrderChange={handleQuickFilterOrderChange}
         mergeRequests={mergeRequests}
         loading={loading}
         loadingMore={loadingMore}

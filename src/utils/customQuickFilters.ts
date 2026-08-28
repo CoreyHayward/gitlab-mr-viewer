@@ -3,6 +3,7 @@ export const MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH = 80;
 export const MAX_CUSTOM_QUICK_FILTER_URL_LENGTH = 12_000;
 
 const CUSTOM_QUICK_FILTERS_STORAGE_PREFIX = 'gitlab-mr-viewer:custom-quick-filters:v1:';
+const QUICK_FILTER_ORDER_STORAGE_PREFIX = 'gitlab-mr-viewer:quick-filter-order:v1:';
 
 export interface CustomQuickFilter {
   id: string;
@@ -19,6 +20,10 @@ const normalizeScope = (scope: string) => scope.trim();
 
 export const customQuickFiltersStorageKey = (scope: string) => (
   `${CUSTOM_QUICK_FILTERS_STORAGE_PREFIX}${encodeURIComponent(normalizeScope(scope))}`
+);
+
+export const quickFilterOrderStorageKey = (scope: string) => (
+  `${QUICK_FILTER_ORDER_STORAGE_PREFIX}${encodeURIComponent(normalizeScope(scope))}`
 );
 
 const normalizeName = (name: string) => {
@@ -101,6 +106,44 @@ export const getCurrentFilterURL = (): string => {
 };
 
 export const loadCustomQuickFilters = (scope: string): CustomQuickFilter[] => readStorage(scope);
+
+const normalizeQuickFilterOrder = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (typeof item !== 'string') return [];
+    const id = item.trim().slice(0, 200);
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    return [id];
+  }).slice(0, MAX_CUSTOM_QUICK_FILTERS + 4);
+};
+
+export const loadQuickFilterOrder = (scope: string): string[] => {
+  if (typeof window === 'undefined' || !normalizeScope(scope)) return [];
+
+  try {
+    const raw = window.localStorage.getItem(quickFilterOrderStorageKey(scope));
+    return raw ? normalizeQuickFilterOrder(JSON.parse(raw)) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveQuickFilterOrder = (scope: string, order: string[]): boolean => {
+  if (typeof window === 'undefined' || !normalizeScope(scope)) return false;
+
+  try {
+    window.localStorage.setItem(
+      quickFilterOrderStorageKey(scope),
+      JSON.stringify(normalizeQuickFilterOrder(order))
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export const addCustomQuickFilter = (
   scope: string,

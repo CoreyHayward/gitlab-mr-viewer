@@ -3,7 +3,10 @@ import {
   addCustomQuickFilter,
   customQuickFiltersStorageKey,
   loadCustomQuickFilters,
-  removeCustomQuickFilter
+  loadQuickFilterOrder,
+  quickFilterOrderStorageKey,
+  removeCustomQuickFilter,
+  saveQuickFilterOrder
 } from '@/utils/customQuickFilters';
 
 const localStorageStub = () => {
@@ -67,5 +70,15 @@ describe('custom quick filter storage', () => {
 
     expect(removeCustomQuickFilter('scope', 'valid')).toEqual([]);
     expect(loadCustomQuickFilters('scope')).toEqual([]);
+  });
+
+  it('persists a deduplicated quick-filter navigation order per scope', () => {
+    const localStorage = localStorageStub();
+    vi.stubGlobal('window', { localStorage });
+
+    expect(saveQuickFilterOrder('scope', ['preset:needs-approval', 'custom:review', 'preset:needs-approval'])).toBe(true);
+    expect(loadQuickFilterOrder('scope')).toEqual(['preset:needs-approval', 'custom:review']);
+    expect(loadQuickFilterOrder('other-scope')).toEqual([]);
+    expect(quickFilterOrderStorageKey('scope')).not.toBe(quickFilterOrderStorageKey('other-scope'));
   });
 });
