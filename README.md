@@ -1,41 +1,6 @@
 # ReviewFlow / GitLab MR Viewer
 
-ReviewFlow now has two modes:
-
-- a native macOS review studio that uses the GitLab, Codex, and Claude Code CLIs already authenticated on your Mac;
-- the original static, client-side GitLab workspace for finding merge requests, monitoring merge trains, and reviewing changed code in a browser.
-
-This project began as an experiment with agentic development tools and remains a practical personal/team utility.
-
-## Native macOS app
-
-The desktop app provides a focused review-request dashboard, local filters, exact-ref managed worktrees, a guided semantic walkthrough, private notes and progress, repository-aware Q&A, and an optional automated pass that proposes evidence-backed candidate findings for human verification.
-
-GitLab is implemented through a provider-neutral source-control adapter. The contracts, settings UI, review references, repository manager, and persistence layer already reserve GitHub as the next adapter; GitHub is visible but intentionally disabled until that implementation ships. See [the desktop architecture](docs/desktop-architecture.md).
-
-Requirements:
-
-- Apple Silicon Mac and Node.js 20 or newer for this unsigned MVP build;
-- `glab` installed and authenticated for the GitLab host (`glab auth login --hostname gitlab.com`);
-- Codex and/or Claude Code installed, with at least one authenticated (`codex login` or `claude auth login`).
-
-Run the native app in development:
-
-```bash
-npm ci
-npm run desktop:dev
-```
-
-Build an unsigned local `.app`:
-
-```bash
-npm run desktop:package
-open release/mac-arm64/ReviewFlow.app
-```
-
-`desktop:package` creates an unpacked app for local use. `desktop:dist` creates unsigned DMG and ZIP artifacts. Signing, notarization, Intel builds, and distribution hardening are intentionally outside the MVP.
-
-ReviewFlow creates repositories and detached worktrees only inside its own macOS application-data directory. It does not touch an existing checkout. Agent runs are constrained to read-only repository access, and the desktop MVP never posts comments, approves, merges, or edits code automatically.
+A client-side GitLab workspace for finding merge requests, monitoring merge trains, and reviewing changed code in a browser.
 
 ## Web app capabilities
 

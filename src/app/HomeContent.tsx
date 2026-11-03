@@ -20,7 +20,6 @@ import {
 } from '@/utils/urlState';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useMergeRequestResults } from '@/hooks/useMergeRequestResults';
-import DesktopApp from '@/components/desktop/DesktopApp';
 import {
   addCustomQuickFilter,
   getCurrentFilterURL,
@@ -60,20 +59,6 @@ const applyQuickFilter = (
 };
 
 export default function HomeContent() {
-  const [desktopMode, setDesktopMode] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    setDesktopMode(Boolean(window.reviewflowDesktop));
-  }, []);
-
-  if (desktopMode === null) {
-    return <div className="min-h-screen bg-[#0b0d12]" aria-label="Opening ReviewFlow" />;
-  }
-
-  return desktopMode ? <DesktopApp /> : <WebHomeContent />;
-}
-
-function WebHomeContent() {
   const [service, setService] = useState<GitLabService | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<GitLabProject[]>([]);
   const [filters, setFilters] = useState<FilterOptions>({ state: 'opened' });

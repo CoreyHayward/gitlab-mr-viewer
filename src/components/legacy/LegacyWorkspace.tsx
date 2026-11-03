@@ -1,7 +1,7 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Bookmark, ChevronDown, ChevronUp, Eye, GitBranch, GripVertical, History, Link, Plus, Search, Settings2, TriangleAlert, User, X, type LucideIcon } from 'lucide-react';
+import { Bookmark, ChevronDown, ChevronUp, Copy, Eye, GitBranch, GripVertical, History, Link, Plus, Search, Settings2, TriangleAlert, User, X, type LucideIcon } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
@@ -114,6 +114,7 @@ export default function LegacyWorkspace({
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
   const [mergeTrainWatcherTrainMode, setMergeTrainWatcherTrainMode] = useState(false);
   const [mergeRequestSearch, setMergeRequestSearch] = useState('');
+  const [copyNotice, setCopyNotice] = useState('');
   const [isSavingCustomQuickFilter, setIsSavingCustomQuickFilter] = useState(false);
   const [customQuickFilterName, setCustomQuickFilterName] = useState('');
   const [customQuickFilterError, setCustomQuickFilterError] = useState<string | null>(null);
@@ -395,8 +396,19 @@ export default function LegacyWorkspace({
               </div>
 
             {!loading && (
-              <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+              <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
+                <span>
                 Showing {isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length} loaded merge request{(isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length) === 1 ? '' : 's'}{isMergeRequestSearchActive && ` matching "${deferredMergeRequestSearch.trim()}"`} {selectedProjects.length === 1 ? <>in <strong>{selectedProjects[0].path_with_namespace}</strong></> : selectedProjects.length > 1 ? <>across <strong>{selectedProjects.length} selected projects</strong></> : 'across your GitLab projects'}{hasMore ? '; more are available' : ''}.
+                </span>
+                <button type="button" disabled={!visibleMergeRequests.length} onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(visibleMergeRequests.map((mr) => `${mr.title} - ${mr.web_url}`).join('\n'));
+                    setCopyNotice('Copied');
+                  } catch {
+                    setCopyNotice('Copy failed');
+                  }
+                }} className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700"><Copy className="h-3.5 w-3.5" />Copy list</button>
+                <span role="status" className="text-xs">{copyNotice}</span>
               </div>
             )}
 
