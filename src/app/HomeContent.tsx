@@ -340,8 +340,8 @@ export default function HomeContent() {
     setQuickFilter((current) => current === filter ? null : filter);
   };
 
-  const handleApplyCustomQuickFilter = useCallback((customFilter: CustomQuickFilter) => {
-    if (activeCustomQuickFilterId === customFilter.id && customQuickFilterPreviousURLRef.current !== null) {
+  const handleApplyCustomQuickFilter = useCallback((customFilter: CustomQuickFilter, force = false) => {
+    if (!force && activeCustomQuickFilterId === customFilter.id && customQuickFilterPreviousURLRef.current !== null) {
       const previousURL = customQuickFilterPreviousURLRef.current;
       customQuickFilterPreviousURLRef.current = null;
       const url = new URL(window.location.href);
@@ -491,6 +491,7 @@ export default function HomeContent() {
         activeCustomQuickFilterId={activeCustomQuickFilterId}
         canSaveCustomQuickFilters={customQuickFilterScope !== null}
         onApplyCustomQuickFilter={handleApplyCustomQuickFilter}
+        onRestoreCustomQuickFilter={(view) => handleApplyCustomQuickFilter(view, true)}
         onSaveCustomQuickFilter={handleSaveCustomQuickFilter}
         onUpdateCustomQuickFilter={handleUpdateCustomQuickFilter}
         onRemoveCustomQuickFilter={handleRemoveCustomQuickFilter}

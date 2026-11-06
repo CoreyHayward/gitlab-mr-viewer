@@ -59,6 +59,7 @@ interface LegacyWorkspaceProps {
   activeCustomQuickFilterId: string | null;
   canSaveCustomQuickFilters: boolean;
   onApplyCustomQuickFilter: (filter: CustomQuickFilter) => void;
+  onRestoreCustomQuickFilter: (filter: CustomQuickFilter) => void;
   onSaveCustomQuickFilter: (name: string) => boolean;
   onUpdateCustomQuickFilter: (id: string) => boolean;
   onRemoveCustomQuickFilter: (id: string) => void;
@@ -94,6 +95,7 @@ export default function LegacyWorkspace({
   activeCustomQuickFilterId,
   canSaveCustomQuickFilters,
   onApplyCustomQuickFilter,
+  onRestoreCustomQuickFilter,
   onSaveCustomQuickFilter,
   onUpdateCustomQuickFilter,
   onRemoveCustomQuickFilter,
@@ -172,6 +174,12 @@ export default function LegacyWorkspace({
   }, []);
 
   const toggleFilters = () => {
+    if (filtersExpanded && editingSavedViewId) {
+      const savedView = customQuickFilters.find((view) => view.id === editingSavedViewId);
+      if (savedView) onRestoreCustomQuickFilter(savedView);
+      setEditingSavedViewId(null);
+      setEditSavedViewError(false);
+    }
     const expanded = !filtersExpanded;
     setFiltersExpanded(expanded);
     saveUIState({ filtersExpanded: expanded });
@@ -309,18 +317,10 @@ export default function LegacyWorkspace({
                         <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-400 active:cursor-grabbing" aria-hidden="true" /><Icon className="h-4 w-4 shrink-0 text-gray-500" /><span title={item.label} className="min-w-0 flex-1 truncate text-sm text-gray-800 dark:text-gray-200">{item.label}</span>
                         <button type="button" onClick={() => index > 0 && moveQuickFilter(item.id, orderedQuickFilterItems[index - 1].id)} disabled={index === 0} aria-label={`Move ${item.label} earlier`} title="Move earlier" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 disabled:opacity-25 dark:hover:bg-neutral-700"><ChevronUp className="h-4 w-4" /></button>
                         <button type="button" onClick={() => index < orderedQuickFilterItems.length - 1 && moveQuickFilter(item.id, orderedQuickFilterItems[index + 1].id)} disabled={index === orderedQuickFilterItems.length - 1} aria-label={`Move ${item.label} later`} title="Move later" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 disabled:opacity-25 dark:hover:bg-neutral-700"><ChevronDown className="h-4 w-4" /></button>
-                        {item.onRemove ? <><button type="button" onClick={() => { const view = customQuickFilters.find((filter) => `custom:${filter.id}` === item.id); if (!view) return; if (activeCustomQuickFilterId !== view.id) onApplyCustomQuickFilter(view); setEditingSavedViewId(view.id); setEditSavedViewError(false); setEditingQuickFilters(false); }} aria-label={`Edit filters for ${item.label}`} title="Edit filters" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-neutral-700"><Pencil className="h-4 w-4" /></button><button type="button" onClick={item.onRemove} aria-label={`Delete custom filter ${item.label}`} title="Delete view" className="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300"><X className="h-4 w-4" /></button></> : <span className="w-14" />}
+                        {item.onRemove ? <><button type="button" onClick={() => { const view = customQuickFilters.find((filter) => `custom:${filter.id}` === item.id); if (!view) return; onRestoreCustomQuickFilter(view); setEditingSavedViewId(view.id); setEditSavedViewError(false); setEditingQuickFilters(false); setFiltersExpanded(true); }} aria-label={`Edit filters for ${item.label}`} title="Edit filters" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-neutral-700"><Pencil className="h-4 w-4" /></button><button type="button" onClick={item.onRemove} aria-label={`Delete custom filter ${item.label}`} title="Delete view" className="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300"><X className="h-4 w-4" /></button></> : <span className="w-14" />}
                       </div>;
                     })}
                   </div>
-                </div>
-              )}
-              {editingSavedViewId && customQuickFilters.some((view) => view.id === editingSavedViewId) && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800" role="status">
-                  <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-200">Editing <strong>{customQuickFilters.find((view) => view.id === editingSavedViewId)?.name}</strong>. Change the filters below, then save.</span>
-                  <button type="button" onClick={() => { if (onUpdateCustomQuickFilter(editingSavedViewId)) { setEditingSavedViewId(null); setEditSavedViewError(false); } else setEditSavedViewError(true); }} className="rounded-md bg-gray-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-700 dark:bg-gray-200 dark:text-gray-900 dark:hover:bg-white">Save changes</button>
-                  <button type="button" onClick={() => { setEditingSavedViewId(null); setEditSavedViewError(false); }} className="rounded-md px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-neutral-700">Cancel</button>
-                  {editSavedViewError && <span className="w-full text-xs text-red-700 dark:text-red-300">Could not save this view in browser storage.</span>}
                 </div>
               )}
             </aside>
@@ -347,7 +347,7 @@ export default function LegacyWorkspace({
                   </button>;
                 })}
               </div>
-              <LegacyFilterPanel filters={filters} onFiltersChange={onFiltersChange} isExpanded={filtersExpanded} onToggle={toggleFilters} service={service} canSaveQuickFilter={canSaveCustomQuickFilters} onSaveQuickFilter={onSaveCustomQuickFilter} />
+              <LegacyFilterPanel filters={filters} onFiltersChange={onFiltersChange} isExpanded={filtersExpanded} onToggle={toggleFilters} service={service} canSaveQuickFilter={canSaveCustomQuickFilters} onSaveQuickFilter={onSaveCustomQuickFilter} editingViewName={customQuickFilters.find((view) => view.id === editingSavedViewId)?.name} editError={editSavedViewError} onSaveEditedView={() => { if (!editingSavedViewId) return; if (!onUpdateCustomQuickFilter(editingSavedViewId)) { setEditSavedViewError(true); return; } setEditingSavedViewId(null); setEditSavedViewError(false); setFiltersExpanded(false); saveUIState({ filtersExpanded: false }); }} />
             </div>
 
             {selectedState !== 'opened' && (filters.approvalState || filters.notReviewedByMe) && (

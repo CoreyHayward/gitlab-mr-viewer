@@ -18,6 +18,7 @@ interface MergeRequestListProps {
 
 export default function MergeRequestList({ mergeRequests, loading, groupBy = 'none', showProjectInfo = false, loadingMessage, emptyMessage = 'No merge requests found', emptyDescription = 'Try adjusting your filters or select a different project to see merge requests', onStartSemanticReview }: MergeRequestListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [expandedLabels, setExpandedLabels] = useState<Set<number>>(() => new Set());
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, {
       year: 'numeric',
@@ -416,27 +417,31 @@ export default function MergeRequestList({ mergeRequests, loading, groupBy = 'no
               )}
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 text-sm text-gray-600 dark:border-neutral-700/70 dark:text-gray-400">
-              <div className="inline-flex min-w-0 items-center gap-2 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+            <div className="mt-3 space-y-2 border-t border-gray-100 pt-3 text-sm text-gray-600 dark:border-neutral-700/70 dark:text-gray-400">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="inline-flex min-w-0 max-w-full items-center gap-2 text-gray-600 dark:text-gray-300" title={`${mr.source_branch} → ${mr.target_branch}`}>
                 <GitBranch className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                <span className="truncate rounded-md bg-white px-2 py-0.5 font-mono text-xs text-gray-700 shadow-sm dark:bg-neutral-800 dark:text-gray-300">
+                <span className="truncate font-mono text-xs text-gray-700 dark:text-gray-200">
                   {mr.source_branch}
                 </span>
                 <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
-                <span className="truncate rounded-md bg-white px-2 py-0.5 font-mono text-xs text-gray-700 shadow-sm dark:bg-neutral-800 dark:text-gray-300">
+                <span className="max-w-[40%] shrink-0 truncate font-mono text-xs text-gray-700 dark:text-gray-200">
                   {mr.target_branch}
                 </span>
               </div>
 
-              {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && (
+              {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && !(mr.detailed_merge_status === 'not_approved' && reviewSummary) && !(mr.detailed_merge_status === 'draft_status' && mr.draft) && (
                 <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${getMergeStatusColor(mr.detailed_merge_status)}`}>
                   <TriangleAlert className="mr-1 h-3 w-3" />
-                  {mr.detailed_merge_status.replace(/_/g, ' ')}
+                  <span className="first-letter:uppercase">{mr.detailed_merge_status.replace(/_/g, ' ')}</span>
                 </span>
               )}
 
-              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="inline-flex min-w-0 items-center gap-1.5" title={mr.assignees.map((person) => person.name).join(', ') || 'Unassigned'}>
                 <User className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+                <span className="text-xs text-gray-500 dark:text-gray-400">Assignee:</span>
                 {mr.assignees.length > 0 ? (
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {(() => {
@@ -444,13 +449,13 @@ export default function MergeRequestList({ mergeRequests, loading, groupBy = 'no
 
                       return (
                         <>
-                          {visible.map((name) => (
-                            <span key={name} className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-800 dark:text-gray-300">
-                              {name}
+                          {visible.map((name, index) => (
+                            <span key={name} className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                              {name}{index < visible.length - 1 ? ',' : ''}
                             </span>
                           ))}
                           {remaining > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-neutral-800 dark:text-gray-400">
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                               +{remaining}
                             </span>
                           )}
@@ -459,12 +464,13 @@ export default function MergeRequestList({ mergeRequests, loading, groupBy = 'no
                     })()}
                   </div>
                 ) : (
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Unassigned</span>
+                  <span className="text-xs text-gray-700 dark:text-gray-300">Unassigned</span>
                 )}
               </div>
 
-              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+              <div className="inline-flex min-w-0 items-center gap-1.5" title={mr.reviewers.map((person) => person.name).join(', ') || 'No reviewers'}>
                 <Eye className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+                <span className="text-xs text-gray-500 dark:text-gray-400">Reviewers:</span>
                 {mr.reviewers.length > 0 ? (
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {(() => {
@@ -472,13 +478,13 @@ export default function MergeRequestList({ mergeRequests, loading, groupBy = 'no
 
                       return (
                         <>
-                          {visible.map((name) => (
-                            <span key={name} className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-800 dark:text-gray-300">
-                              {name}
+                          {visible.map((name, index) => (
+                            <span key={name} className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                              {name}{index < visible.length - 1 ? ',' : ''}
                             </span>
                           ))}
                           {remaining > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-neutral-800 dark:text-gray-400">
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                               +{remaining}
                             </span>
                           )}
@@ -487,30 +493,32 @@ export default function MergeRequestList({ mergeRequests, loading, groupBy = 'no
                     })()}
                   </div>
                 ) : (
-                  <span className="text-xs text-gray-500 dark:text-gray-400">No reviewers</span>
+                  <span className="text-xs text-gray-700 dark:text-gray-300">None</span>
                 )}
               </div>
 
               {mr.labels.length > 0 && (
-                <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1.5 dark:bg-neutral-900/40">
+                <div className="inline-flex min-w-0 flex-wrap items-center gap-1.5" title={mr.labels.join(', ')}>
                   <Tag className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Labels:</span>
                   <div className="flex min-w-0 flex-wrap gap-1">
-                    {mr.labels.slice(0, 3).map((label) => (
+                    {(expandedLabels.has(mr.id) ? mr.labels : mr.labels.slice(0, 3)).map((label) => (
                       <span
                         key={label}
-                        className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-neutral-800 dark:text-gray-300"
+                        className="inline-flex items-center rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-xs font-medium text-gray-800 dark:border-neutral-600 dark:bg-neutral-700 dark:text-gray-100"
                       >
                         {label}
                       </span>
                     ))}
                     {mr.labels.length > 3 && (
-                      <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-neutral-800 dark:text-gray-400">
-                        +{mr.labels.length - 3}
-                      </span>
+                      <button type="button" aria-expanded={expandedLabels.has(mr.id)} aria-label={expandedLabels.has(mr.id) ? `Show fewer labels for ${mr.title}` : `Show ${mr.labels.length - 3} more labels for ${mr.title}`} onClick={() => setExpandedLabels((current) => { const next = new Set(current); if (next.has(mr.id)) next.delete(mr.id); else next.add(mr.id); return next; })} className="rounded px-1 text-xs font-medium text-gray-600 underline decoration-gray-400 underline-offset-2 hover:text-gray-900 focus-visible:outline-2 dark:text-gray-300 dark:hover:text-white">
+                        {expandedLabels.has(mr.id) ? 'Show less' : `+${mr.labels.length - 3} more`}
+                      </button>
                     )}
                   </div>
                 </div>
               )}
+              </div>
             </div>
               </div>
             </div>

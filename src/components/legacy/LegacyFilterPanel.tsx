@@ -22,9 +22,12 @@ interface FilterPanelProps {
   service: GitLabService;
   canSaveQuickFilter: boolean;
   onSaveQuickFilter: (name: string) => boolean;
+  editingViewName?: string;
+  editError?: boolean;
+  onSaveEditedView?: () => void;
 }
 
-export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded, onToggle, service, canSaveQuickFilter, onSaveQuickFilter }: FilterPanelProps) {
+export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded, onToggle, service, canSaveQuickFilter, onSaveQuickFilter, editingViewName, editError, onSaveEditedView }: FilterPanelProps) {
   const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
   const [projectInput, setProjectInput] = useState(filters.projects?.join(', ') ?? '');
   const [savingView, setSavingView] = useState(false);
@@ -91,7 +94,7 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
           <button type="button" onClick={onToggle} aria-label="Close advanced filters" className="absolute inset-0 cursor-default bg-black/40" tabIndex={-1} />
           <div id="advanced-filter-panel" role="dialog" aria-label="Advanced filters" className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl sm:max-h-[calc(100dvh-3rem)] dark:border-neutral-700 dark:bg-neutral-900">
           <div className="flex shrink-0 items-start justify-between border-b border-gray-200 px-5 py-3 dark:border-neutral-700">
-            <div><h3 className="text-base font-semibold text-gray-900 dark:text-white">Advanced filters</h3><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Changes apply as you edit.</p></div>
+            <div><h3 className="text-base font-semibold text-gray-900 dark:text-white">{editingViewName ? `Edit ${editingViewName}` : 'Advanced filters'}</h3><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{editingViewName ? 'Change the filters, then save this quick view.' : 'Changes apply as you edit.'}</p></div>
             <button type="button" onClick={onToggle} aria-label="Close advanced filters" className="rounded-md p-2 text-gray-500 hover:bg-gray-100 focus-visible:outline-2 dark:hover:bg-neutral-800"><X className="h-4 w-4" /></button>
           </div>
           <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
@@ -322,8 +325,9 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
           </div>
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 px-5 py-2 dark:border-neutral-700">
             <button type="button" onClick={clearFilters} disabled={activeFiltersCount === 0} className="inline-flex items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-neutral-800"><Trash2 className="h-4 w-4" />Clear filters</button>
-            <div className="flex items-center gap-2"><button type="button" disabled={!canSaveQuickFilter} onClick={() => { setSavingView(true); setSaveMessage(''); }} className="rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-neutral-800">Save as quick view</button><button type="button" onClick={onToggle} className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">Done</button></div>
+            <div className="flex items-center gap-2">{editingViewName ? <><button type="button" onClick={onToggle} className="rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-neutral-800">Cancel</button><button type="button" onClick={onSaveEditedView} className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">Save changes</button></> : <><button type="button" disabled={!canSaveQuickFilter} onClick={() => { setSavingView(true); setSaveMessage(''); }} className="rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:hover:bg-neutral-800">Save as quick view</button><button type="button" onClick={onToggle} className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">Done</button></>}</div>
           </div>
+          {editError && <p role="alert" className="px-5 pb-3 text-xs text-red-700 dark:text-red-300">Could not save this view in browser storage.</p>}
           {(savingView || saveMessage) && <div className="border-t border-gray-200 px-5 py-3 dark:border-neutral-700">
             {savingView && <form onSubmit={(event) => { event.preventDefault(); const name = viewName.trim(); if (!name) { setSaveMessage('Enter a name for this view.'); return; } if (!onSaveQuickFilter(name)) { setSaveMessage('Could not save this view in browser storage.'); return; } setSavingView(false); setViewName(''); setSaveMessage('Saved to Quick views.'); }} className="flex flex-wrap items-end gap-2">
               <label className="min-w-0 flex-1 text-xs font-medium text-gray-700 dark:text-gray-300">Quick view name<input autoFocus value={viewName} onChange={(event) => { setViewName(event.target.value); setSaveMessage(''); }} maxLength={MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH} placeholder="e.g. Team reviews" className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-2 focus:outline-[#e24329] dark:border-neutral-600 dark:bg-neutral-800 dark:text-white" /></label>
