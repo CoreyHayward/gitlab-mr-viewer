@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyQuickFilter } from '@/utils/quickFilters';
+import { applyQuickFilter, previousURLForQuickFilter } from '@/utils/quickFilters';
+import { decodeFiltersFromURL } from '@/utils/urlState';
 import type { FilterOptions, GitLabUser } from '@/types/gitlab';
 
 const currentUser: GitLabUser = {
@@ -10,6 +11,23 @@ const currentUser: GitLabUser = {
 };
 
 describe('quick merge request filters', () => {
+  it.each(['my-open-prs', 'not-reviewed-by-me'] as const)('clears a previous approval selection when choosing %s', (view) => {
+    const filters: FilterOptions = { state: 'opened', approvalState: 'partially-approved', title: 'team' };
+    const result = applyQuickFilter(filters, view, currentUser);
+    expect(result.approvalState).toBeUndefined();
+    expect(result.title).toBe('team');
+  });
+  it('restores the previous filters when switching from a saved view to a built-in view', () => {
+    const savedFilters = decodeFiltersFromURL(new URLSearchParams('approvalState=partially-approved')).filters;
+    expect(savedFilters.approvalState).toBe('partially-approved');
+    const previousURL = previousURLForQuickFilter('saved-view', '?title=team');
+    const previousFilters = decodeFiltersFromURL(new URLSearchParams(previousURL ?? '')).filters;
+    const nextFilters = applyQuickFilter(previousFilters, 'my-open-prs', currentUser);
+    expect(nextFilters).toEqual({ state: 'opened', title: 'team', authors: ['corey'] });
+    expect(nextFilters.approvalState).toBeUndefined();
+    expect(previousURLForQuickFilter('saved-view', null)).toBe('');
+    expect(previousURLForQuickFilter(null, '?title=team')).toBeNull();
+  });
   it('exposes the active preset alongside the rest of the filters', () => {
     const baseFilters: FilterOptions = {
       state: 'merged',

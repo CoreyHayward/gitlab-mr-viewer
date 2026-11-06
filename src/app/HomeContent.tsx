@@ -9,7 +9,7 @@ import { clearAiProviderConfig, writeAiProviderConfig } from '@/review/storage';
 import type { AiProviderConfig } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
-import { applyQuickFilter, type QuickFilter } from '@/utils/quickFilters';
+import { applyQuickFilter, previousURLForQuickFilter, type QuickFilter } from '@/utils/quickFilters';
 import {
   clearGuidedReviewURL,
   decodeFiltersFromURL,
@@ -335,6 +335,14 @@ export default function HomeContent() {
   };
 
   const handleQuickFilterToggle = (filter: QuickFilter) => {
+    const previousURL = previousURLForQuickFilter(activeCustomQuickFilterId, customQuickFilterPreviousURLRef.current);
+    if (previousURL !== null) {
+      const url = new URL(window.location.href);
+      url.search = previousURL;
+      url.hash = '';
+      window.history.replaceState(window.history.state, '', url.toString());
+      applyURLState();
+    }
     customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId(null);
     setQuickFilter((current) => current === filter ? null : filter);
