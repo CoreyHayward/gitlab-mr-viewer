@@ -16,10 +16,17 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorQueryKey, setErrorQueryKey] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<MergeRequestPageCursor | null>(null);
+  const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const nextCursorRef = useRef<MergeRequestPageCursor | null>(null);
+  const queryKey = JSON.stringify({
+    instance: service?.getInstanceUrl() ?? null,
+    projectIds: selectedProjects.map(({ id }) => id),
+    filters: Object.fromEntries(Object.entries(filters).sort(([left], [right]) => left.localeCompare(right)))
+  });
 
   const load = useCallback(async (append = false) => {
     if (!service || !enabled) return;
@@ -32,6 +39,7 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
     setLoading(!append);
     setLoadingMore(append);
     setError(null);
+    setErrorQueryKey(null);
     if (!append) {
       setWarnings([]);
       nextCursorRef.current = null;
@@ -70,12 +78,14 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
           return new Date(rightTimestamp).getTime() - new Date(leftTimestamp).getTime();
         });
       });
+      setLoadedQueryKey(queryKey);
       nextCursorRef.current = result.nextCursor;
       setNextCursor(result.nextCursor);
       setWarnings((current) => Array.from(new Set(append ? [...current, ...pageWarnings] : pageWarnings)));
     } catch (loadError) {
       if (!controller.signal.aborted) {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load merge requests');
+        setErrorQueryKey(queryKey);
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -83,16 +93,18 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
         setLoadingMore(false);
       }
     }
-  }, [enabled, filters, selectedProjects, service]);
+  }, [enabled, filters, queryKey, selectedProjects, service]);
 
   const reset = useCallback(() => {
     requestControllerRef.current?.abort();
     requestControllerRef.current = null;
     nextCursorRef.current = null;
     setMergeRequests([]);
+    setLoadedQueryKey(null);
     setNextCursor(null);
     setWarnings([]);
     setError(null);
+    setErrorQueryKey(null);
     setLoading(false);
     setLoadingMore(false);
   }, []);
@@ -105,9 +117,11 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
 
   return {
     mergeRequests,
+    resultsMatchQuery: loadedQueryKey === queryKey,
     loading,
     loadingMore,
     error,
+    errorMatchesQuery: errorQueryKey === queryKey,
     warnings,
     hasMore: nextCursor !== null,
     load,

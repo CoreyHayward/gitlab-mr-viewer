@@ -6,7 +6,8 @@ import {
   loadQuickFilterOrder,
   quickFilterOrderStorageKey,
   removeCustomQuickFilter,
-  saveQuickFilterOrder
+  saveQuickFilterOrder,
+  updateCustomQuickFilter
 } from '@/utils/customQuickFilters';
 
 const localStorageStub = () => {
@@ -80,5 +81,16 @@ describe('custom quick filter storage', () => {
     expect(loadQuickFilterOrder('scope')).toEqual(['preset:needs-approval', 'custom:review']);
     expect(loadQuickFilterOrder('other-scope')).toEqual([]);
     expect(quickFilterOrderStorageKey('scope')).not.toBe(quickFilterOrderStorageKey('other-scope'));
+  });
+
+  it('updates only the selected saved view and keeps its identity', () => {
+    vi.stubGlobal('window', { localStorage: localStorageStub() });
+    const original = addCustomQuickFilter('scope', 'Team', '?state=opened')![0];
+    expect(updateCustomQuickFilter('scope', original.id, '?state=merged&title=fix')).toEqual([
+      { ...original, url: '?state=merged&title=fix' }
+    ]);
+    expect(loadCustomQuickFilters('scope')[0].url).toBe('?state=merged&title=fix');
+    expect(updateCustomQuickFilter('scope', 'missing', '?state=closed')).toBeNull();
+    expect(loadCustomQuickFilters('scope')[0].url).toBe('?state=merged&title=fix');
   });
 });

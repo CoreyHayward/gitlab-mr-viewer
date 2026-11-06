@@ -1,18 +1,22 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Bookmark, ChevronDown, ChevronUp, Copy, Eye, GitBranch, GripVertical, History, Link, Plus, Search, Settings2, TriangleAlert, User, X, type LucideIcon } from 'lucide-react';
+import { Bookmark, ChevronDown, ChevronUp, Copy, Eye, GitBranch, GripVertical, Link, Pencil, Search, Settings2, TriangleAlert, User, X, type LucideIcon } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
 import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
 import { loadUIState, saveUIState } from '@/utils/uiState';
+import { getApprovalCategory } from '@/utils/approvalState';
+import type { QuickFilter } from '@/utils/quickFilters';
 import MergeRequestList from '@/components/MergeRequestList';
 import LegacyFilterPanel from './LegacyFilterPanel';
 import LegacyMergeTrainWatcher from './LegacyMergeTrainWatcher';
 import LegacyProjectSelector from './LegacyProjectSelector';
-import { MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH, type CustomQuickFilter } from '@/utils/customQuickFilters';
+import { type CustomQuickFilter } from '@/utils/customQuickFilters';
 
-export type LegacyQuickFilter = 'my-open-prs' | 'needs-approval' | 'not-reviewed-by-me' | 'recently-merged-prs';
+export type LegacyQuickFilter = QuickFilter;
+type MergeRequestSort = 'updated-desc' | 'updated-asc' | 'comments-desc' | 'size-desc';
+type MergeRequestGroupBy = 'none' | 'project' | 'author' | 'review';
 
 interface QuickFilterNavigationItem {
   id: string;
@@ -37,6 +41,8 @@ const matchesMergeRequestSearch = (mergeRequest: GitLabMergeRequest, searchTerm:
     mergeRequest.project?.path_with_namespace,
     mergeRequest.source_branch,
     mergeRequest.target_branch,
+    ...mergeRequest.assignees.flatMap(({ name, username }) => [name, username]),
+    ...mergeRequest.reviewers.flatMap(({ name, username }) => [name, username]),
     ...mergeRequest.labels
   ];
 
@@ -54,6 +60,7 @@ interface LegacyWorkspaceProps {
   canSaveCustomQuickFilters: boolean;
   onApplyCustomQuickFilter: (filter: CustomQuickFilter) => void;
   onSaveCustomQuickFilter: (name: string) => boolean;
+  onUpdateCustomQuickFilter: (id: string) => boolean;
   onRemoveCustomQuickFilter: (id: string) => void;
   quickFilterOrder: string[];
   onQuickFilterOrderChange: (order: string[]) => void;
@@ -88,6 +95,7 @@ export default function LegacyWorkspace({
   canSaveCustomQuickFilters,
   onApplyCustomQuickFilter,
   onSaveCustomQuickFilter,
+  onUpdateCustomQuickFilter,
   onRemoveCustomQuickFilter,
   quickFilterOrder,
   onQuickFilterOrderChange,
@@ -113,12 +121,15 @@ export default function LegacyWorkspace({
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [mergeTrainWatcherVisible, setMergeTrainWatcherVisible] = useState(true);
   const [mergeTrainWatcherTrainMode, setMergeTrainWatcherTrainMode] = useState(false);
+  const [mobileWatcherOpen, setMobileWatcherOpen] = useState(false);
+  const [mergeRequestSort, setMergeRequestSort] = useState<MergeRequestSort>('updated-desc');
+  const [mergeRequestGroupBy, setMergeRequestGroupBy] = useState<MergeRequestGroupBy>('none');
   const [mergeRequestSearch, setMergeRequestSearch] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
-  const [isSavingCustomQuickFilter, setIsSavingCustomQuickFilter] = useState(false);
-  const [customQuickFilterName, setCustomQuickFilterName] = useState('');
-  const [customQuickFilterError, setCustomQuickFilterError] = useState<string | null>(null);
+  const [editingSavedViewId, setEditingSavedViewId] = useState<string | null>(null);
+  const [editSavedViewError, setEditSavedViewError] = useState(false);
   const [draggedQuickFilterId, setDraggedQuickFilterId] = useState<string | null>(null);
+  const [editingQuickFilters, setEditingQuickFilters] = useState(false);
   const deferredMergeRequestSearch = useDeferredValue(mergeRequestSearch);
 
   const isMergeRequestSearchActive = deferredMergeRequestSearch.trim().length > 0;
@@ -129,10 +140,35 @@ export default function LegacyWorkspace({
     return mergeRequests.filter((mergeRequest) => matchesMergeRequestSearch(mergeRequest, searchTerm));
   }, [deferredMergeRequestSearch, mergeRequests]);
 
+  const sortedMergeRequests = useMemo(() => [...visibleMergeRequests].sort((left, right) => {
+    if (mergeRequestSort === 'comments-desc') return right.user_notes_count - left.user_notes_count;
+    if (mergeRequestSort === 'size-desc') {
+      if (!left.diff_stats || !right.diff_stats) return Number(Boolean(right.diff_stats)) - Number(Boolean(left.diff_stats));
+      const leftSize = (left.diff_stats?.additions ?? 0) + (left.diff_stats?.deletions ?? 0);
+      const rightSize = (right.diff_stats?.additions ?? 0) + (right.diff_stats?.deletions ?? 0);
+      return rightSize - leftSize;
+    }
+
+    const updatedDifference = new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime();
+    return mergeRequestSort === 'updated-asc' ? -updatedDifference : updatedDifference;
+  }), [mergeRequestSort, visibleMergeRequests]);
+
+  const resultSummary = useMemo(() => ({
+    needsApproval: visibleMergeRequests.filter((mergeRequest) => {
+      const category = getApprovalCategory(mergeRequest);
+      return category === 'needs-review' || category === 'partially-approved';
+    }).length,
+    drafts: visibleMergeRequests.filter((mergeRequest) => mergeRequest.draft).length,
+    failedPipelines: visibleMergeRequests.filter((mergeRequest) => mergeRequest.pipeline?.status === 'failed').length
+  }), [visibleMergeRequests]);
+  const selectedState = filters.state ?? 'opened';
+
   useEffect(() => {
     const savedUIState = loadUIState();
     if (savedUIState.filtersExpanded !== undefined) setFiltersExpanded(savedUIState.filtersExpanded);
     if (savedUIState.mergeTrainWatcherVisible !== undefined) setMergeTrainWatcherVisible(savedUIState.mergeTrainWatcherVisible);
+    if (savedUIState.mergeRequestSort) setMergeRequestSort(savedUIState.mergeRequestSort);
+    if (savedUIState.mergeRequestGroupBy) setMergeRequestGroupBy(savedUIState.mergeRequestGroupBy);
   }, []);
 
   const toggleFilters = () => {
@@ -147,8 +183,18 @@ export default function LegacyWorkspace({
     saveUIState({ mergeTrainWatcherVisible: visible });
   };
 
-  const primaryActionClassName = 'inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-900';
-  const secondaryActionClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200 dark:hover:border-neutral-600 dark:hover:bg-neutral-700 dark:focus:ring-neutral-500 dark:focus:ring-offset-neutral-900';
+  const setListSort = (sort: MergeRequestSort) => {
+    setMergeRequestSort(sort);
+    saveUIState({ mergeRequestSort: sort });
+  };
+
+  const setListGroupBy = (groupBy: MergeRequestGroupBy) => {
+    setMergeRequestGroupBy(groupBy);
+    saveUIState({ mergeRequestGroupBy: groupBy });
+  };
+
+  const primaryActionClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-100 dark:hover:bg-neutral-700 dark:focus:ring-offset-neutral-900';
+  const secondaryActionClassName = 'inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200 dark:hover:border-neutral-600 dark:hover:bg-neutral-700 dark:focus:ring-neutral-500 dark:focus:ring-offset-neutral-900';
 
   const quickFilterItems = useMemo<QuickFilterNavigationItem[]>(() => [
     {
@@ -157,24 +203,8 @@ export default function LegacyWorkspace({
       icon: User,
       active: quickFilter === 'my-open-prs',
       disabled: !currentUser,
-      activeClassName: 'border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200',
+      activeClassName: 'border-[#e24329]/40 bg-[#e24329]/10 text-[#a92b1b] dark:border-[#e24329]/50 dark:bg-[#e24329]/15 dark:text-[#ff9b85]',
       onActivate: () => onQuickFilterToggle('my-open-prs')
-    },
-    {
-      id: 'preset:needs-approval',
-      label: 'Needs approval',
-      icon: TriangleAlert,
-      active: quickFilter === 'needs-approval',
-      activeClassName: 'border-rose-200 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-200',
-      onActivate: () => onQuickFilterToggle('needs-approval')
-    },
-    {
-      id: 'preset:recently-merged-prs',
-      label: 'Recently merged MRs',
-      icon: History,
-      active: quickFilter === 'recently-merged-prs',
-      activeClassName: 'border-violet-200 bg-violet-100 text-violet-800 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-200',
-      onActivate: () => onQuickFilterToggle('recently-merged-prs')
     },
     {
       id: 'preset:not-reviewed-by-me',
@@ -182,7 +212,7 @@ export default function LegacyWorkspace({
       icon: Eye,
       active: quickFilter === 'not-reviewed-by-me',
       disabled: !currentUser,
-      activeClassName: 'border-sky-200 bg-sky-100 text-sky-800 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-200',
+      activeClassName: 'border-[#e24329]/40 bg-[#e24329]/10 text-[#a92b1b] dark:border-[#e24329]/50 dark:bg-[#e24329]/15 dark:text-[#ff9b85]',
       onActivate: () => onQuickFilterToggle('not-reviewed-by-me')
     },
     ...customQuickFilters.map((customFilter): QuickFilterNavigationItem => ({
@@ -190,7 +220,7 @@ export default function LegacyWorkspace({
       label: customFilter.name,
       icon: Bookmark,
       active: activeCustomQuickFilterId === customFilter.id,
-      activeClassName: 'border-gray-400 bg-gray-100 text-gray-900 dark:border-neutral-500 dark:bg-neutral-700 dark:text-white',
+      activeClassName: 'border-[#e24329]/40 bg-[#e24329]/10 text-[#a92b1b] dark:border-[#e24329]/50 dark:bg-[#e24329]/15 dark:text-[#ff9b85]',
       onActivate: () => onApplyCustomQuickFilter(customFilter),
       onRemove: () => onRemoveCustomQuickFilter(customFilter.id)
     }))
@@ -218,46 +248,23 @@ export default function LegacyWorkspace({
     onQuickFilterOrderChange(orderedIds);
   };
 
-  const quickFilterItemClassName = (item: QuickFilterNavigationItem) => `flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 pr-20 text-left text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-neutral-500 ${
+  const quickFilterItemClassName = (item: QuickFilterNavigationItem) => `flex min-w-0 shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#e24329] ${
     item.active
       ? item.activeClassName
       : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700'
   } ${item.disabled ? 'cursor-not-allowed opacity-60' : ''}`;
 
-  const openCustomQuickFilterForm = () => {
-    setCustomQuickFilterError(null);
-    setCustomQuickFilterName('');
-    setIsSavingCustomQuickFilter(true);
-  };
-
-  const closeCustomQuickFilterForm = () => {
-    setCustomQuickFilterError(null);
-    setCustomQuickFilterName('');
-    setIsSavingCustomQuickFilter(false);
-  };
-
-  const saveCurrentCustomQuickFilter = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = customQuickFilterName.trim();
-    if (!name) {
-      setCustomQuickFilterError('Enter a name for this filter.');
-      return;
-    }
-    if (!onSaveCustomQuickFilter(name)) {
-      setCustomQuickFilterError('This filter could not be saved in browser storage.');
-      return;
-    }
-    closeCustomQuickFilterForm();
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-neutral-900">
-      <div className="mx-auto w-full max-w-[1800px] px-4 py-8">
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">GitLab MR Viewer</h1>
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white/80 p-1.5 shadow-sm backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-800/80">
+      <div className="mx-auto w-full max-w-[1800px] px-4 py-5 sm:px-6 sm:py-6">
+        <div className="mb-4 flex flex-col gap-3 border-b border-gray-200 pb-4 sm:flex-row sm:items-center sm:justify-between dark:border-neutral-800">
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">GitLab MR Viewer</h1>
+          <div className="flex flex-wrap items-center gap-2">
             <AutoRefreshControl loading={loading} onRefresh={onRefresh} autoRefreshEnabled={autoRefreshEnabled} onAutoRefreshEnabledChange={onAutoRefreshEnabledChange} className={primaryActionClassName} />
             <button type="button" onClick={onShare} className={secondaryActionClassName}><Link className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />Share URL</button>
+            {mergeTrainWatcherVisible && (
+              <button type="button" onClick={() => setMobileWatcherOpen((open) => !open)} aria-expanded={mobileWatcherOpen} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 xl:hidden dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200"><GitBranch className="h-4 w-4 text-amber-600" />Merge trains</button>
+            )}
             {!mergeTrainWatcherVisible && (
               <button type="button" onClick={() => setMergeTrainVisibility(true)} className={secondaryActionClassName}><GitBranch className="h-4 w-4 text-amber-600 dark:text-amber-400" />Merge Trains</button>
             )}
@@ -265,81 +272,95 @@ export default function LegacyWorkspace({
           </div>
         </div>
 
-        <div className={mergeTrainWatcherVisible
-          ? mergeTrainWatcherTrainMode
-            ? 'space-y-6'
-            : 'grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)_360px] xl:items-start'
-          : 'grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start'}
-        >
+        <div className="space-y-5">
           {mergeTrainWatcherVisible && mergeTrainWatcherTrainMode && (
-            <aside>
+            <aside className={`${mobileWatcherOpen ? '' : 'hidden'} xl:block`}>
               <LegacyMergeTrainWatcher service={service} onHide={() => setMergeTrainVisibility(false)} trainModeEnabled={mergeTrainWatcherTrainMode} onTrainModeChange={setMergeTrainWatcherTrainMode} />
             </aside>
           )}
 
           {!error && (
-            <aside className="order-first xl:order-none xl:sticky xl:top-6">
-              <nav aria-label="Quick filters" className="rounded-xl border border-gray-200 bg-white/80 p-3 shadow-sm backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-800/80">
-                <div className="mb-2 flex items-center justify-between px-1">
-                  <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Quick filters</h2>
-                  <button type="button" onClick={openCustomQuickFilterForm} disabled={!canSaveCustomQuickFilters} aria-label="Save current filter" title="Save current filter" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-white"><Plus className="h-4 w-4" /></button>
-                </div>
-                <div className="space-y-1">
-                  {orderedQuickFilterItems.map((item, index) => {
+            <aside className="relative min-w-0">
+              <nav aria-label="Quick filters" className="flex min-w-0 items-center gap-2">
+                <h2 className="hidden shrink-0 text-xs font-semibold text-gray-500 sm:block dark:text-gray-400">Quick views</h2>
+                <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-1">
+                  {orderedQuickFilterItems.map((item) => {
                     const Icon = item.icon;
                     return (
-                      <div
-                        key={item.id}
-                        draggable
-                        onDragStart={(event) => {
-                          setDraggedQuickFilterId(item.id);
-                          event.dataTransfer.effectAllowed = 'move';
-                          event.dataTransfer.setData('text/plain', item.id);
-                        }}
-                        onDragEnd={() => setDraggedQuickFilterId(null)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          moveQuickFilter(draggedQuickFilterId ?? event.dataTransfer.getData('text/plain'), item.id);
-                          setDraggedQuickFilterId(null);
-                        }}
-                        className={`group relative flex items-center gap-1 rounded-lg ${draggedQuickFilterId === item.id ? 'opacity-50' : ''}`}
-                      >
-                        <GripVertical className="h-4 w-3 shrink-0 cursor-grab text-gray-300 group-hover:text-gray-500 active:cursor-grabbing dark:text-neutral-600 dark:group-hover:text-neutral-400" aria-hidden="true" />
-                        <button type="button" onClick={item.onActivate} disabled={item.disabled} className={quickFilterItemClassName(item)} title={item.label}>
+                        <button key={item.id} type="button" onClick={item.onActivate} disabled={item.disabled} aria-pressed={item.active} className={quickFilterItemClassName(item)} title={item.label}>
                           <Icon className="h-4 w-4 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">{item.label}</span>
                         </button>
-                        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center rounded-md bg-inherit opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                          <button type="button" onClick={() => index > 0 && moveQuickFilter(item.id, orderedQuickFilterItems[index - 1].id)} disabled={index === 0} aria-label={`Move ${item.label} up`} className="rounded p-1 text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-0 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-gray-200"><ChevronUp className="h-3.5 w-3.5" /></button>
-                          <button type="button" onClick={() => index < orderedQuickFilterItems.length - 1 && moveQuickFilter(item.id, orderedQuickFilterItems[index + 1].id)} disabled={index === orderedQuickFilterItems.length - 1} aria-label={`Move ${item.label} down`} className="rounded p-1 text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-0 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-gray-200"><ChevronDown className="h-3.5 w-3.5" /></button>
-                          {item.onRemove && <button type="button" onClick={item.onRemove} aria-label={`Delete custom filter ${item.label}`} className="rounded p-1 text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-gray-200"><X className="h-3.5 w-3.5" /></button>}
-                        </div>
-                      </div>
                     );
                   })}
                 </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button type="button" onClick={() => setEditingQuickFilters((editing) => !editing)} aria-expanded={editingQuickFilters} aria-controls="manage-quick-views" className="rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-neutral-700">{editingQuickFilters ? 'Done' : 'Edit'}</button>
+                </div>
               </nav>
-              {isSavingCustomQuickFilter && (
-                <form onSubmit={saveCurrentCustomQuickFilter} className="mt-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-800">
-                  <label htmlFor="custom-quick-filter-name" className="block text-sm font-semibold text-gray-900 dark:text-white">Name this filter</label>
-                  <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">The current URL filter state will be saved in this browser.</p>
-                  <input id="custom-quick-filter-name" type="text" value={customQuickFilterName} onChange={(event) => { setCustomQuickFilterName(event.target.value); setCustomQuickFilterError(null); }} maxLength={MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH} placeholder="e.g. Backend MRs awaiting review" autoFocus className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:border-neutral-600 dark:bg-neutral-800 dark:text-white dark:focus:ring-neutral-700" />
-                  {customQuickFilterError && <p className="mt-1 text-xs font-medium text-red-700 dark:text-red-300" role="alert">{customQuickFilterError}</p>}
-                  <div className="mt-3 flex gap-2">
-                    <button type="submit" className="inline-flex flex-1 items-center justify-center rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:bg-gray-200 dark:text-gray-900 dark:hover:bg-white dark:focus:ring-gray-400 dark:focus:ring-offset-neutral-900">Save filter</button>
-                    <button type="button" onClick={closeCustomQuickFilterForm} className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-200 dark:hover:border-neutral-500 dark:hover:bg-neutral-700 dark:focus:ring-neutral-500 dark:focus:ring-offset-neutral-900">Cancel</button>
+              {editingQuickFilters && (
+                <div id="manage-quick-views" className="absolute right-0 top-full z-30 mt-2 w-[min(24rem,100%)] rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-800" onKeyDown={(event) => { if (event.key === 'Escape') setEditingQuickFilters(false); }}>
+                  <div className="mb-2 flex items-center justify-between px-1"><h3 className="text-sm font-semibold text-gray-900 dark:text-white">Manage quick views</h3><button type="button" onClick={() => setEditingQuickFilters(false)} aria-label="Close quick view editor" className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-neutral-700"><X className="h-4 w-4" /></button></div>
+                  <p className="mb-2 px-1 text-xs text-gray-500 dark:text-gray-400">Drag to reorder or use the arrows.</p>
+                  <div className="max-h-80 overflow-y-auto">
+                    {orderedQuickFilterItems.map((item, index) => {
+                      const Icon = item.icon;
+                      return <div key={item.id} draggable onDragStart={(event) => { setDraggedQuickFilterId(item.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id); }} onDragEnd={() => setDraggedQuickFilterId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveQuickFilter(draggedQuickFilterId ?? event.dataTransfer.getData('text/plain'), item.id); setDraggedQuickFilterId(null); }} className={`flex items-center gap-2 border-t border-gray-100 py-1.5 dark:border-neutral-700 ${draggedQuickFilterId === item.id ? 'opacity-50' : ''}`}>
+                        <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-gray-400 active:cursor-grabbing" aria-hidden="true" /><Icon className="h-4 w-4 shrink-0 text-gray-500" /><span title={item.label} className="min-w-0 flex-1 truncate text-sm text-gray-800 dark:text-gray-200">{item.label}</span>
+                        <button type="button" onClick={() => index > 0 && moveQuickFilter(item.id, orderedQuickFilterItems[index - 1].id)} disabled={index === 0} aria-label={`Move ${item.label} earlier`} title="Move earlier" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 disabled:opacity-25 dark:hover:bg-neutral-700"><ChevronUp className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => index < orderedQuickFilterItems.length - 1 && moveQuickFilter(item.id, orderedQuickFilterItems[index + 1].id)} disabled={index === orderedQuickFilterItems.length - 1} aria-label={`Move ${item.label} later`} title="Move later" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 disabled:opacity-25 dark:hover:bg-neutral-700"><ChevronDown className="h-4 w-4" /></button>
+                        {item.onRemove ? <><button type="button" onClick={() => { const view = customQuickFilters.find((filter) => `custom:${filter.id}` === item.id); if (!view) return; if (activeCustomQuickFilterId !== view.id) onApplyCustomQuickFilter(view); setEditingSavedViewId(view.id); setEditSavedViewError(false); setEditingQuickFilters(false); }} aria-label={`Edit filters for ${item.label}`} title="Edit filters" className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-neutral-700"><Pencil className="h-4 w-4" /></button><button type="button" onClick={item.onRemove} aria-label={`Delete custom filter ${item.label}`} title="Delete view" className="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300"><X className="h-4 w-4" /></button></> : <span className="w-14" />}
+                      </div>;
+                    })}
                   </div>
-                </form>
+                </div>
+              )}
+              {editingSavedViewId && customQuickFilters.some((view) => view.id === editingSavedViewId) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800" role="status">
+                  <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-200">Editing <strong>{customQuickFilters.find((view) => view.id === editingSavedViewId)?.name}</strong>. Change the filters below, then save.</span>
+                  <button type="button" onClick={() => { if (onUpdateCustomQuickFilter(editingSavedViewId)) { setEditingSavedViewId(null); setEditSavedViewError(false); } else setEditSavedViewError(true); }} className="rounded-md bg-gray-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-700 dark:bg-gray-200 dark:text-gray-900 dark:hover:bg-white">Save changes</button>
+                  <button type="button" onClick={() => { setEditingSavedViewId(null); setEditSavedViewError(false); }} className="rounded-md px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-neutral-700">Cancel</button>
+                  {editSavedViewError && <span className="w-full text-xs text-red-700 dark:text-red-300">Could not save this view in browser storage.</span>}
+                </div>
               )}
             </aside>
           )}
 
-          <main className="min-w-0 xl:col-start-2">
+          <div className={`grid gap-5 xl:items-start ${mergeTrainWatcherVisible && !mergeTrainWatcherTrainMode ? 'xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]' : ''}`}>
+          <main className="min-w-0">
             <div className="relative z-20 mb-6 flex flex-wrap items-center gap-2">
               <LegacyProjectSelector service={service} selectedProjects={selectedProjects} onProjectsChange={onProjectsChange} />
-              <LegacyFilterPanel filters={filters} onFiltersChange={onFiltersChange} isExpanded={filtersExpanded} onToggle={toggleFilters} service={service} />
+              <div role="group" aria-label="Filter by merge request state or approval" className="inline-flex max-w-full flex-wrap rounded-lg border border-gray-200 bg-white p-1 dark:border-neutral-700 dark:bg-neutral-800">
+                {([
+                  ['opened', 'Open'],
+                  ['needs-approval', 'Needs approval'],
+                  ['approved', 'Approved'],
+                  ['merged', 'Merged'],
+                  ['closed', 'Closed'],
+                  ['all', 'All']
+                ] as const).map(([state, label]) => {
+                  const approvalTab = state === 'approved' || state === 'needs-approval';
+                  const hasApprovalTab = filters.approvalState === 'approved' || filters.approvalState === 'needs-approval';
+                  const active = approvalTab ? selectedState === 'opened' && filters.approvalState === state : selectedState === state && !(state === 'opened' && hasApprovalTab);
+                  return <button key={state} type="button" aria-pressed={active} onClick={() => onFiltersChange(approvalTab ? { ...filters, state: 'opened', approvalState: state } : { ...filters, state, approvalState: hasApprovalTab ? undefined : filters.approvalState })} className={`rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-[#e24329] ${active ? 'bg-[#e24329]/10 text-[#a92b1b] dark:bg-[#e24329]/15 dark:text-[#ff9b85]' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-neutral-700'}`}>
+                    {label}
+                  </button>;
+                })}
+              </div>
+              <LegacyFilterPanel filters={filters} onFiltersChange={onFiltersChange} isExpanded={filtersExpanded} onToggle={toggleFilters} service={service} canSaveQuickFilter={canSaveCustomQuickFilters} onSaveQuickFilter={onSaveCustomQuickFilter} />
             </div>
+
+            {selectedState !== 'opened' && (filters.approvalState || filters.notReviewedByMe) && (
+              <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100" role="status">
+                Review status filters only match open MRs. Choose Open or clear the review filters.
+              </p>
+            )}
+
+            {selectedState !== 'merged' && filters.mergedAfter && (
+              <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100" role="status">
+                Merged After only matches merged MRs. Choose Merged or clear this date.
+              </p>
+            )}
 
             {shareNotice && (
               <div className="mb-6 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100" role="status">
@@ -371,16 +392,16 @@ export default function LegacyWorkspace({
 
             {!error && (
               <div>
-                  <div className="mb-4">
-                <div className="relative w-full sm:max-w-xl">
+              <div className="mb-4 grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
+                <div className="relative col-span-2 min-w-0 sm:flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
                     type="search"
                     value={mergeRequestSearch}
                     onChange={(event) => setMergeRequestSearch(event.target.value)}
-                    placeholder="Search loaded merge requests..."
+                    placeholder="Search titles, people, branches, labels…"
                     aria-label="Search loaded merge requests"
-                    className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-10 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 hover:border-gray-300 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white dark:placeholder:text-gray-500 dark:hover:border-neutral-600 dark:focus:border-violet-400 dark:focus:ring-violet-900/30"
+                    className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-10 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 hover:border-gray-300 focus:border-[#e24329] focus:ring-2 focus:ring-[#e24329]/20 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white dark:placeholder:text-gray-500 dark:hover:border-neutral-600 dark:focus:border-[#e24329] dark:focus:ring-[#e24329]/30"
                   />
                   {mergeRequestSearch && (
                     <button
@@ -393,6 +414,16 @@ export default function LegacyWorkspace({
                     </button>
                   )}
                 </div>
+                <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-500 sm:flex-row sm:items-center sm:gap-2 sm:text-sm dark:text-gray-400">Sort
+                  <select aria-label="Sort merge requests" value={mergeRequestSort} onChange={(event) => setListSort(event.target.value as MergeRequestSort)} className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm text-gray-800 sm:w-auto sm:px-3 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-100">
+                    <option value="updated-desc">Recently updated</option><option value="updated-asc">Oldest updated</option><option value="comments-desc">Most discussed</option><option value="size-desc">Largest changes</option>
+                  </select>
+                </label>
+                <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-500 sm:flex-row sm:items-center sm:gap-2 sm:text-sm dark:text-gray-400">Group
+                  <select aria-label="Group merge requests" value={mergeRequestGroupBy} onChange={(event) => setListGroupBy(event.target.value as MergeRequestGroupBy)} className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm text-gray-800 sm:w-auto sm:px-3 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-100">
+                    <option value="none">No grouping</option><option value="project">Project</option><option value="author">Author</option><option value="review">Review status</option>
+                  </select>
+                </label>
               </div>
 
             {!loading && (
@@ -400,9 +431,12 @@ export default function LegacyWorkspace({
                 <span>
                 Showing {isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length} loaded merge request{(isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length) === 1 ? '' : 's'}{isMergeRequestSearchActive && ` matching "${deferredMergeRequestSearch.trim()}"`} {selectedProjects.length === 1 ? <>in <strong>{selectedProjects[0].path_with_namespace}</strong></> : selectedProjects.length > 1 ? <>across <strong>{selectedProjects.length} selected projects</strong></> : 'across your GitLab projects'}{hasMore ? '; more are available' : ''}.
                 </span>
+                {resultSummary.needsApproval > 0 && <span className="text-rose-700 dark:text-rose-300">{resultSummary.needsApproval} need approval</span>}
+                {resultSummary.drafts > 0 && <span>{resultSummary.drafts} drafts</span>}
+                {resultSummary.failedPipelines > 0 && <span className="text-red-700 dark:text-red-300">{resultSummary.failedPipelines} failed pipelines</span>}
                 <button type="button" disabled={!visibleMergeRequests.length} onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(visibleMergeRequests.map((mr) => `${mr.title} - ${mr.web_url}`).join('\n'));
+                    await navigator.clipboard.writeText(sortedMergeRequests.map((mr) => `${mr.title} - ${mr.web_url}`).join('\n'));
                     setCopyNotice('Copied');
                   } catch {
                     setCopyNotice('Copy failed');
@@ -413,7 +447,8 @@ export default function LegacyWorkspace({
             )}
 
             <MergeRequestList
-              mergeRequests={visibleMergeRequests}
+              mergeRequests={sortedMergeRequests}
+              groupBy={mergeRequestGroupBy}
               loading={loading}
               showProjectInfo={selectedProjects.length !== 1}
               loadingMessage={selectedProjects.length === 0 ? 'Loading merge requests across your projects...' : selectedProjects.length > 1 ? `Loading merge requests from ${selectedProjects.length} selected projects...` : undefined}
@@ -434,10 +469,11 @@ export default function LegacyWorkspace({
           </main>
 
           {mergeTrainWatcherVisible && !mergeTrainWatcherTrainMode && (
-            <aside className="order-first xl:order-none xl:sticky xl:top-6">
+            <aside className={`order-first ${mobileWatcherOpen ? '' : 'hidden'} xl:order-none xl:sticky xl:top-4 xl:block`}>
               <LegacyMergeTrainWatcher service={service} onHide={() => setMergeTrainVisibility(false)} trainModeEnabled={mergeTrainWatcherTrainMode} onTrainModeChange={setMergeTrainWatcherTrainMode} />
             </aside>
           )}
+          </div>
         </div>
       </div>
     </div>

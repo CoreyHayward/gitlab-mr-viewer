@@ -1,12 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { GitLabMergeRequest } from '@/types/gitlab';
 import { getApprovalCategory } from '@/utils/approvalState';
-import { CircleCheck, Check, X, Loader2, Clock, Info, MessageSquare, GitBranch, ArrowRight, TriangleAlert, User, Eye, Tag, FileText, Sparkles } from 'lucide-react';
+import { CircleCheck, Check, ChevronRight, X, Loader2, Clock, Info, MessageSquare, GitBranch, ArrowRight, TriangleAlert, User, Eye, Tag, FileText, Sparkles } from 'lucide-react';
 
 interface MergeRequestListProps {
   mergeRequests: GitLabMergeRequest[];
   loading: boolean;
+  groupBy?: 'none' | 'project' | 'author' | 'review';
   showProjectInfo?: boolean; // New prop to control whether to show project info
   loadingMessage?: string; // Custom loading message
   emptyMessage?: string;
@@ -14,7 +16,8 @@ interface MergeRequestListProps {
   onStartSemanticReview?: (mergeRequest: GitLabMergeRequest) => void;
 }
 
-export default function MergeRequestList({ mergeRequests, loading, showProjectInfo = false, loadingMessage, emptyMessage = 'No merge requests found', emptyDescription = 'Try adjusting your filters or select a different project to see merge requests', onStartSemanticReview }: MergeRequestListProps) {
+export default function MergeRequestList({ mergeRequests, loading, groupBy = 'none', showProjectInfo = false, loadingMessage, emptyMessage = 'No merge requests found', emptyDescription = 'Try adjusting your filters or select a different project to see merge requests', onStartSemanticReview }: MergeRequestListProps) {
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString(undefined, {
       year: 'numeric',
@@ -277,8 +280,18 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
     );
   }
 
+  const groups = new Map<string, GitLabMergeRequest[]>();
+  for (const mr of mergeRequests) {
+    const category = getApprovalCategory(mr);
+    const label = groupBy === 'project' ? (mr.project?.path_with_namespace ?? `Project #${mr.project_id}`)
+      : groupBy === 'author' ? `${mr.author.name} (@${mr.author.username})`
+      : groupBy === 'review' ? (mr.state !== 'opened' ? (mr.state === 'merged' ? 'Merged' : 'Closed') : mr.draft ? 'Draft' : ({ 'needs-review': 'Needs approval', 'partially-approved': 'Partially approved', approved: 'Approved', 'no-approval-required': 'No approval gate', loading: 'Approval unavailable', 'not-open': 'Closed' }[category]))
+      : '';
+    groups.set(label, [...(groups.get(label) ?? []), mr]);
+  }
+
   return (
-    <div className="space-y-3" aria-busy={loading}>
+    <div className="space-y-5" aria-busy={loading}>
       {loading && loadingMessage && (
         <div className="text-center" role="status" aria-live="polite">
           <div className="inline-flex items-center space-x-3 rounded-xl border border-violet-200 bg-violet-50 px-6 py-4 dark:border-violet-800 dark:bg-violet-900/10">
@@ -289,7 +302,14 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
           </div>
         </div>
       )}
-      {mergeRequests.map((mr) => (
+      {Array.from(groups, ([label, requests]) => {
+        const groupKey = `${groupBy}:${label}`;
+        const collapsed = label !== '' && collapsedGroups.has(groupKey);
+        return (
+        <section key={groupKey}>
+          {label && <h2 className="mb-2"><button type="button" aria-expanded={!collapsed} onClick={() => setCollapsedGroups((current) => { const next = new Set(current); if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey); return next; })} className="inline-flex max-w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-[#e24329] dark:text-gray-200 dark:hover:bg-neutral-800"><ChevronRight className={`h-4 w-4 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`} /><span className="break-words">{label}</span><span className="text-xs font-normal text-gray-500">{requests.length}</span></button></h2>}
+          {!collapsed && <div className="space-y-3">
+      {requests.map((mr) => (
         (() => {
           const reviewSummary = getApprovalSummary(mr);
           const sizeBadge = getSizeBadge(mr);
@@ -497,6 +517,9 @@ export default function MergeRequestList({ mergeRequests, loading, showProjectIn
           );
         })()
       ))}
+          </div>}
+        </section>
+      ); })}
     </div>
   );
 }

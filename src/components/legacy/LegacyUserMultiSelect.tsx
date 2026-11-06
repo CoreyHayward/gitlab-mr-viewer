@@ -151,11 +151,11 @@ export default function LegacyUserMultiSelect({
       <div className="relative" ref={dropdownRef}>
         {/* Selected users display */}
         {selectedUsers.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-slate-50 dark:bg-neutral-900/10 rounded-lg border border-slate-200 dark:border-neutral-800">
+          <div className="mb-2 flex flex-wrap gap-1.5">
             {selectedUserObjects.map(user => (
               <span
                 key={user.username}
-                className="inline-flex items-center px-3 py-1.5 bg-slate-100 dark:bg-neutral-900/30 text-slate-800 dark:text-neutral-200 text-sm rounded-full border border-slate-200 dark:border-neutral-700"
+                className="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-800 dark:bg-neutral-800 dark:text-gray-200"
               >
                 {user.avatar_url ? (
                   <Image
@@ -188,7 +188,7 @@ export default function LegacyUserMultiSelect({
               .map(username => (
                 <span
                   key={username}
-                  className="inline-flex items-center px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300 text-sm rounded-full border border-gray-200 dark:border-gray-600"
+                  className="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-800 dark:bg-neutral-800 dark:text-gray-200"
                 >
                   <span className="font-medium">@{username}</span>
                   <button
@@ -227,7 +227,7 @@ export default function LegacyUserMultiSelect({
               options[event.key === 'ArrowDown' ? 0 : options.length - 1]?.focus();
             }}
             placeholder={placeholder}
-            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
+            className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 hover:border-gray-400 focus:border-[#e24329] focus:outline-none focus:ring-2 focus:ring-[#e24329]/20 dark:border-neutral-600 dark:bg-neutral-800 dark:text-white dark:placeholder:text-gray-500"
           />
           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
             <ChevronDown

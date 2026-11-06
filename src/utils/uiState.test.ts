@@ -36,4 +36,16 @@ describe('UI state storage', () => {
 
     expect(loadUIState()).toEqual({ filtersExpanded: true, mergeTrainWatcherVisible: false });
   });
+
+  it('keeps list preferences and ignores unsupported values', () => {
+    vi.stubGlobal('window', {
+      localStorage: localStorageStub(JSON.stringify({
+        mergeRequestSort: 'size-desc',
+        mergeRequestGroupBy: 'review',
+        filtersExpanded: 'yes'
+      }))
+    });
+
+    expect(loadUIState()).toEqual({ mergeRequestSort: 'size-desc', mergeRequestGroupBy: 'review' });
+  });
 });

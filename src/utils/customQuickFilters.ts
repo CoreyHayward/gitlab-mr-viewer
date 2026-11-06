@@ -169,3 +169,12 @@ export const removeCustomQuickFilter = (scope: string, id: string): CustomQuickF
   const nextFilters = readStorage(scope).filter((filter) => filter.id !== id);
   return writeStorage(scope, nextFilters) ? nextFilters : null;
 };
+
+export const updateCustomQuickFilter = (scope: string, id: string, url: string): CustomQuickFilter[] | null => {
+  const normalizedURL = normalizeURL(url);
+  if (!normalizeScope(scope) || !id || normalizedURL === null) return null;
+  const filters = readStorage(scope);
+  if (!filters.some((filter) => filter.id === id)) return null;
+  const nextFilters = filters.map((filter) => filter.id === id ? { ...filter, url: normalizedURL } : filter);
+  return writeStorage(scope, nextFilters) ? nextFilters : null;
+};

@@ -5,6 +5,8 @@ interface UIState {
   projectSelectorOpen?: boolean;
   mergeTrainWatcherExpanded?: boolean;
   mergeTrainWatcherVisible?: boolean;
+  mergeRequestSort?: 'updated-desc' | 'updated-asc' | 'comments-desc' | 'size-desc';
+  mergeRequestGroupBy?: 'none' | 'project' | 'author' | 'review';
 }
 
 const UI_STATE_KEY = 'gitlab-mr-viewer-ui-state';
@@ -16,7 +18,13 @@ const validatedUIState = (value: unknown): UIState => {
     ...(typeof candidate.filtersExpanded === 'boolean' ? { filtersExpanded: candidate.filtersExpanded } : {}),
     ...(typeof candidate.projectSelectorOpen === 'boolean' ? { projectSelectorOpen: candidate.projectSelectorOpen } : {}),
     ...(typeof candidate.mergeTrainWatcherExpanded === 'boolean' ? { mergeTrainWatcherExpanded: candidate.mergeTrainWatcherExpanded } : {}),
-    ...(typeof candidate.mergeTrainWatcherVisible === 'boolean' ? { mergeTrainWatcherVisible: candidate.mergeTrainWatcherVisible } : {})
+    ...(typeof candidate.mergeTrainWatcherVisible === 'boolean' ? { mergeTrainWatcherVisible: candidate.mergeTrainWatcherVisible } : {}),
+    ...(candidate.mergeRequestSort === 'updated-desc' || candidate.mergeRequestSort === 'updated-asc' || candidate.mergeRequestSort === 'comments-desc' || candidate.mergeRequestSort === 'size-desc'
+      ? { mergeRequestSort: candidate.mergeRequestSort }
+      : {}),
+    ...(candidate.mergeRequestGroupBy === 'none' || candidate.mergeRequestGroupBy === 'project' || candidate.mergeRequestGroupBy === 'author' || candidate.mergeRequestGroupBy === 'review'
+      ? { mergeRequestGroupBy: candidate.mergeRequestGroupBy }
+      : {})
   };
 };
 

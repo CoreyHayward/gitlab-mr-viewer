@@ -22,12 +22,12 @@ export default function AutoRefreshControl({
 
   return (
     <div
-      className="relative flex items-center gap-1"
+      className="relative inline-flex items-stretch"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setIsPopoverOpen(false);
       }}
     >
-      <button type="button" onClick={onRefresh} disabled={loading} className={className}>
+      <button type="button" onClick={onRefresh} disabled={loading} className={`${className} rounded-r-none`}>
         <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         {loading ? 'Refreshing...' : 'Refresh'}
       </button>
@@ -36,9 +36,9 @@ export default function AutoRefreshControl({
         onClick={() => setIsPopoverOpen((open) => !open)}
         aria-expanded={isPopoverOpen}
         aria-haspopup="true"
-        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-2.5 text-xs font-semibold text-gray-600 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-200 dark:hover:bg-neutral-700"
+        aria-label={`Auto refresh ${autoRefreshEnabled ? 'on' : 'off'}; change setting`}
+        className="inline-flex items-center justify-center rounded-r-lg border border-l-0 border-gray-300 bg-white px-2 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-gray-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-gray-400 dark:hover:bg-neutral-700 dark:hover:text-gray-200"
       >
-        Auto {autoRefreshEnabled ? 'on' : 'off'}
         <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isPopoverOpen ? 'rotate-180' : ''}`} />
       </button>
       {isPopoverOpen && (
