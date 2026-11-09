@@ -430,7 +430,14 @@ export default function MergeRequestList({ mergeRequests, loading, groupBy = 'no
                 </span>
               </div>
 
-              {mr.detailed_merge_status && mr.detailed_merge_status !== 'mergeable' && !(mr.detailed_merge_status === 'not_approved' && reviewSummary) && !(mr.detailed_merge_status === 'draft_status' && mr.draft) && (
+              {mr.state === 'opened' && (mr.has_conflicts || mr.detailed_merge_status === 'conflict' || mr.detailed_merge_status === 'merge_conflict' || mr.merge_status === 'cannot_be_merged') && (
+                <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
+                  <TriangleAlert className="mr-1 h-3 w-3" />
+                  Merge conflicts
+                </span>
+              )}
+
+              {mr.detailed_merge_status && !['conflict', 'merge_conflict'].includes(mr.detailed_merge_status) && mr.detailed_merge_status !== 'mergeable' && !(mr.detailed_merge_status === 'not_approved' && reviewSummary) && !(mr.detailed_merge_status === 'draft_status' && mr.draft) && (
                 <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${getMergeStatusColor(mr.detailed_merge_status)}`}>
                   <TriangleAlert className="mr-1 h-3 w-3" />
                   <span className="first-letter:uppercase">{mr.detailed_merge_status.replace(/_/g, ' ')}</span>

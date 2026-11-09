@@ -63,6 +63,7 @@ export interface GitLabMergeRequest {
   labels: string[];
   draft: boolean;
   work_in_progress: boolean;
+  has_conflicts?: boolean;
   merge_status: string;
   detailed_merge_status: string;
   conflicts_can_be_resolved_in_ui: boolean;
