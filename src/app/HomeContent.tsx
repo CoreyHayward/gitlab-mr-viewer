@@ -8,7 +8,7 @@ import LegacyWorkspace from '@/components/legacy/LegacyWorkspace';
 import { clearAiProviderConfig, writeAiProviderConfig } from '@/review/storage';
 import type { AiProviderConfig } from '@/review/types';
 import { GitLabService } from '@/services/gitlab';
-import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
+import { FilterOptions, GitLabMergeRequest, GitLabUser } from '@/types/gitlab';
 import { applyQuickFilter, previousURLForQuickFilter, type QuickFilter } from '@/utils/quickFilters';
 import {
   clearGuidedReviewURL,
@@ -17,9 +17,11 @@ import {
   encodeFiltersToURL,
   isGuidedReviewHistoryEntry,
   pushGuidedReviewURL,
+  MAX_SHARED_LIST_VALUES,
   updateURL,
   type GuidedReviewLocation
 } from '@/utils/urlState';
+import { uniqueStrings } from '@/services/gitlab/mergeRequests';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useMergeRequestResults } from '@/hooks/useMergeRequestResults';
 import {
@@ -37,7 +39,6 @@ const AUTO_REFRESH_ENABLED_KEY = 'gitlab-mr-viewer-auto-refresh-enabled';
 
 export default function HomeContent() {
   const [service, setService] = useState<GitLabService | null>(null);
-  const [selectedProjects, setSelectedProjects] = useState<GitLabProject[]>([]);
   const [baseFilters, setBaseFilters] = useState<FilterOptions>({ state: 'opened' });
   const [currentUser, setCurrentUser] = useState<GitLabUser | null>(null);
   const [navigationError, setNavigationError] = useState<string | null>(null);
@@ -79,7 +80,6 @@ export default function HomeContent() {
     reset: resetMergeRequestResults
   } = useMergeRequestResults({
     service,
-    selectedProjects,
     filters: requestFilters,
     enabled: initialProjectIds !== null && initialProjectIds.length === 0
   });
@@ -94,7 +94,6 @@ export default function HomeContent() {
     setActiveCustomQuickFilterId(null);
     if (!preserveCustomQuickFilterState) customQuickFilterPreviousURLRef.current = null;
     setInitialProjectIds(projectIds ?? []);
-    if (!projectIds || projectIds.length === 0) setSelectedProjects([]);
     setGuidedReviewLocation(guidedReview);
     setReviewingMergeRequest(null);
     setProjectResolutionWarnings([]);
@@ -155,7 +154,13 @@ export default function HomeContent() {
     }))
       .then((results) => {
         if (!active) return;
-        setSelectedProjects(results.map(({ project }) => project).filter((project): project is GitLabProject => project !== null));
+        const projectPaths = results.flatMap(({ project }) => project ? [project.path_with_namespace] : []);
+        if (projectPaths.length > 0) {
+          setBaseFilters((current) => ({
+            ...current,
+            projects: uniqueStrings([...(current.projects ?? []), ...projectPaths]).slice(0, MAX_SHARED_LIST_VALUES)
+          }));
+        }
         setProjectResolutionWarnings(results.flatMap(({ projectId, error }) => error
           ? [`Project ${projectId} from the shared URL could not be loaded: ${error instanceof Error ? error.message : 'Unknown error'}`]
           : []));
@@ -256,16 +261,8 @@ export default function HomeContent() {
 
   useEffect(() => {
     if (!service || initialProjectIds === null || initialProjectIds.length > 0) return;
-    updateURL(displayFilters, selectedProjects.map((project) => project.id));
-  }, [displayFilters, initialProjectIds, selectedProjects, service]);
-
-  const handleProjectsChange = (projects: GitLabProject[]) => {
-    customQuickFilterPreviousURLRef.current = null;
-    setActiveCustomQuickFilterId(null);
-    setSelectedProjects(projects);
-    setProjectResolutionWarnings([]);
-    setInitialProjectIds([]);
-  };
+    updateURL(displayFilters);
+  }, [displayFilters, initialProjectIds, service]);
 
   const handleStartSemanticReview = useCallback((mergeRequest: GitLabMergeRequest) => {
     const location = { projectId: mergeRequest.project_id, iid: mergeRequest.iid };
@@ -314,7 +311,6 @@ export default function HomeContent() {
 
       if (instanceChanged) {
         customQuickFilterPreviousURLRef.current = null;
-        setSelectedProjects([]);
         setBaseFilters({ state: 'opened' });
         setQuickFilter(null);
         setInitialProjectIds([]);
@@ -331,6 +327,7 @@ export default function HomeContent() {
     customQuickFilterPreviousURLRef.current = null;
     setActiveCustomQuickFilterId(null);
     setQuickFilter(null);
+    setProjectResolutionWarnings([]);
     setBaseFilters(nextFilters);
   };
 
@@ -373,21 +370,21 @@ export default function HomeContent() {
 
   const handleSaveCustomQuickFilter = useCallback((name: string) => {
     if (!customQuickFilterScope) return false;
-    const query = encodeFiltersToURL(displayFilters, selectedProjects.map((project) => project.id));
+    const query = encodeFiltersToURL(displayFilters);
     const nextFilters = addCustomQuickFilter(customQuickFilterScope, name, query ? `?${query}` : '');
     if (!nextFilters) return false;
     setCustomQuickFilters(nextFilters);
     return true;
-  }, [customQuickFilterScope, displayFilters, selectedProjects]);
+  }, [customQuickFilterScope, displayFilters]);
 
   const handleUpdateCustomQuickFilter = useCallback((id: string) => {
     if (!customQuickFilterScope) return false;
-    const query = encodeFiltersToURL(displayFilters, selectedProjects.map((project) => project.id));
+    const query = encodeFiltersToURL(displayFilters);
     const nextFilters = updateCustomQuickFilter(customQuickFilterScope, id, query ? `?${query}` : '');
     if (!nextFilters) return false;
     setCustomQuickFilters(nextFilters);
     return true;
-  }, [customQuickFilterScope, displayFilters, selectedProjects]);
+  }, [customQuickFilterScope, displayFilters]);
 
   const handleRemoveCustomQuickFilter = useCallback((id: string) => {
     if (!customQuickFilterScope) return;
@@ -419,7 +416,7 @@ export default function HomeContent() {
 
   const handleShareURL = async () => {
     const url = new URL(window.location.href);
-    url.search = encodeFiltersToURL(displayFilters, selectedProjects.map((project) => project.id));
+    url.search = encodeFiltersToURL(displayFilters);
     try {
       await navigator.clipboard.writeText(url.toString());
       setShareNotice('View URL copied to the clipboard.');
@@ -431,7 +428,6 @@ export default function HomeContent() {
   const handleDisconnect = () => {
     resetMergeRequestResults();
     setService(null);
-    setSelectedProjects([]);
     setCurrentUser(null);
     setAiConfig(null);
     setIsConnectionSettingsOpen(false);
@@ -491,8 +487,6 @@ export default function HomeContent() {
     <>
       <LegacyWorkspace
         service={service}
-        selectedProjects={selectedProjects}
-        onProjectsChange={handleProjectsChange}
         filters={displayFilters}
         onFiltersChange={handleFiltersChange}
         customQuickFilters={customQuickFilters}

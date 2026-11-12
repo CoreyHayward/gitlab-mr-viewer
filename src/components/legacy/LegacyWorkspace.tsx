@@ -4,14 +4,13 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Bookmark, ChevronDown, ChevronUp, Copy, Eye, GitBranch, GripVertical, Link, Pencil, Search, Settings2, TriangleAlert, User, X, type LucideIcon } from 'lucide-react';
 import AutoRefreshControl from '@/components/AutoRefreshControl';
 import { GitLabService } from '@/services/gitlab';
-import { FilterOptions, GitLabMergeRequest, GitLabProject, GitLabUser } from '@/types/gitlab';
+import { FilterOptions, GitLabMergeRequest, GitLabUser } from '@/types/gitlab';
 import { loadUIState, saveUIState } from '@/utils/uiState';
 import { getApprovalCategory } from '@/utils/approvalState';
 import type { QuickFilter } from '@/utils/quickFilters';
 import MergeRequestList from '@/components/MergeRequestList';
 import LegacyFilterPanel from './LegacyFilterPanel';
 import LegacyMergeTrainWatcher from './LegacyMergeTrainWatcher';
-import LegacyProjectSelector from './LegacyProjectSelector';
 import { type CustomQuickFilter } from '@/utils/customQuickFilters';
 
 export type LegacyQuickFilter = QuickFilter;
@@ -51,8 +50,6 @@ const matchesMergeRequestSearch = (mergeRequest: GitLabMergeRequest, searchTerm:
 
 interface LegacyWorkspaceProps {
   service: GitLabService;
-  selectedProjects: GitLabProject[];
-  onProjectsChange: (projects: GitLabProject[]) => void;
   filters: FilterOptions;
   onFiltersChange: (filters: FilterOptions) => void;
   customQuickFilters: CustomQuickFilter[];
@@ -87,8 +84,6 @@ interface LegacyWorkspaceProps {
 
 export default function LegacyWorkspace({
   service,
-  selectedProjects,
-  onProjectsChange,
   filters,
   onFiltersChange,
   customQuickFilters,
@@ -133,6 +128,7 @@ export default function LegacyWorkspace({
   const [draggedQuickFilterId, setDraggedQuickFilterId] = useState<string | null>(null);
   const [editingQuickFilters, setEditingQuickFilters] = useState(false);
   const deferredMergeRequestSearch = useDeferredValue(mergeRequestSearch);
+  const filteredProjects = filters.projects ?? [];
 
   const isMergeRequestSearchActive = deferredMergeRequestSearch.trim().length > 0;
   const visibleMergeRequests = useMemo(() => {
@@ -329,7 +325,6 @@ export default function LegacyWorkspace({
           <div className={`grid gap-5 xl:items-start ${mergeTrainWatcherVisible && !mergeTrainWatcherTrainMode ? 'xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]' : ''}`}>
           <main className="min-w-0">
             <div className="relative z-20 mb-6 flex flex-wrap items-center gap-2">
-              <LegacyProjectSelector service={service} selectedProjects={selectedProjects} onProjectsChange={onProjectsChange} />
               <div role="group" aria-label="Filter by merge request state or approval" className="inline-flex max-w-full flex-wrap rounded-lg border border-gray-200 bg-white p-1 dark:border-neutral-700 dark:bg-neutral-800">
                 {([
                   ['opened', 'Open'],
@@ -429,7 +424,7 @@ export default function LegacyWorkspace({
             {!loading && (
               <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                 <span>
-                Showing {isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length} loaded merge request{(isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length) === 1 ? '' : 's'}{isMergeRequestSearchActive && ` matching "${deferredMergeRequestSearch.trim()}"`} {selectedProjects.length === 1 ? <>in <strong>{selectedProjects[0].path_with_namespace}</strong></> : selectedProjects.length > 1 ? <>across <strong>{selectedProjects.length} selected projects</strong></> : 'across your GitLab projects'}{hasMore ? '; more are available' : ''}.
+                Showing {isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length} loaded merge request{(isMergeRequestSearchActive ? visibleMergeRequests.length : mergeRequests.length) === 1 ? '' : 's'}{isMergeRequestSearchActive && ` matching "${deferredMergeRequestSearch.trim()}"`} {filteredProjects.length === 1 ? <>in <strong>{filteredProjects[0]}</strong></> : filteredProjects.length > 1 ? <>across <strong>{filteredProjects.length} selected projects</strong></> : 'across your GitLab projects'}{hasMore ? '; more are available' : ''}.
                 </span>
                 {resultSummary.needsApproval > 0 && <span className="text-rose-700 dark:text-rose-300">{resultSummary.needsApproval} need approval</span>}
                 {resultSummary.drafts > 0 && <span>{resultSummary.drafts} drafts</span>}
@@ -450,8 +445,8 @@ export default function LegacyWorkspace({
               mergeRequests={sortedMergeRequests}
               groupBy={mergeRequestGroupBy}
               loading={loading}
-              showProjectInfo={selectedProjects.length !== 1}
-              loadingMessage={selectedProjects.length === 0 ? 'Loading merge requests across your projects...' : selectedProjects.length > 1 ? `Loading merge requests from ${selectedProjects.length} selected projects...` : undefined}
+              showProjectInfo={filteredProjects.length !== 1}
+              loadingMessage={filteredProjects.length === 0 ? 'Loading merge requests across your projects...' : filteredProjects.length > 1 ? `Loading merge requests from ${filteredProjects.length} selected projects...` : undefined}
               emptyMessage={isMergeRequestSearchActive ? 'No merge requests match your search' : undefined}
               emptyDescription={isMergeRequestSearchActive ? 'Try a different search term or clear the search to see all loaded merge requests.' : undefined}
               onStartSemanticReview={onStartSemanticReview}

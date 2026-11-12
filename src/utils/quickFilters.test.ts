@@ -17,6 +17,10 @@ describe('quick merge request filters', () => {
     expect(result.approvalState).toBeUndefined();
     expect(result.title).toBe('team');
   });
+  it.each(['my-open-prs', 'needs-approval', 'not-reviewed-by-me'] as const)('clears a previous project selection when choosing %s', (view) => {
+    const result = applyQuickFilter({ state: 'opened', projects: ['group/viewer'] }, view, currentUser);
+    expect(result.projects).toBeUndefined();
+  });
   it('restores the previous filters when switching from a saved view to a built-in view', () => {
     const savedFilters = decodeFiltersFromURL(new URLSearchParams('approvalState=partially-approved')).filters;
     expect(savedFilters.approvalState).toBe('partially-approved');
@@ -31,8 +35,7 @@ describe('quick merge request filters', () => {
   it('exposes the active preset alongside the rest of the filters', () => {
     const baseFilters: FilterOptions = {
       state: 'merged',
-      title: 'APPS',
-      projects: ['group/frontend']
+      title: 'APPS'
     };
 
     const visibleFilters = applyQuickFilter(baseFilters, 'needs-approval', currentUser);
@@ -41,13 +44,11 @@ describe('quick merge request filters', () => {
     expect(visibleFilters).toEqual({
       state: 'opened',
       title: 'APPS',
-      projects: ['group/frontend'],
       approvalState: 'needs-approval'
     });
     expect(editedFilters).toEqual({
       state: 'opened',
       title: 'APPS-5183',
-      projects: ['group/frontend'],
       approvalState: 'needs-approval'
     });
   });

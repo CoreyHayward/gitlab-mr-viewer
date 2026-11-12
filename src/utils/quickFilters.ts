@@ -12,11 +12,11 @@ export const applyQuickFilter = (
 ): FilterOptions => {
   switch (quickFilter) {
     case 'my-open-prs':
-      return currentUser ? { ...filters, state: 'opened', approvalState: undefined, authors: [currentUser.username] } : filters;
+      return currentUser ? { ...filters, state: 'opened', approvalState: undefined, projects: undefined, authors: [currentUser.username] } : filters;
     case 'needs-approval':
-      return { ...filters, state: 'opened', approvalState: 'needs-approval' };
+      return { ...filters, state: 'opened', approvalState: 'needs-approval', projects: undefined };
     case 'not-reviewed-by-me':
-      return { ...filters, state: 'opened', approvalState: undefined, notReviewedByMe: true };
+      return { ...filters, state: 'opened', approvalState: undefined, projects: undefined, notReviewedByMe: true };
     default:
       return filters;
   }

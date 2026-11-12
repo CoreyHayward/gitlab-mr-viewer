@@ -1025,27 +1025,6 @@ export class GitLabService {
     return this.loadMergeRequestTargets(targets, filters, signal);
   }
 
-  async getMergeRequestsForProjects(
-    projectIds: number[],
-    filters: FilterOptions = {},
-    signal?: AbortSignal,
-    cursor?: MergeRequestPageCursor | null
-  ): Promise<MergeRequestLoadResult> {
-    const uniqueProjectIds = Array.from(new Set(projectIds)).filter((id) => Number.isSafeInteger(id) && id > 0);
-    const targets = cursor?.targets ?? buildMergeRequestTargets(
-      uniqueProjectIds.map((projectId) => ({
-        endpoint: `/projects/${projectId}/merge_requests`,
-        label: `Project ${projectId}`
-      })),
-      filters
-    );
-    const result = await this.loadMergeRequestTargets(targets, filters, signal);
-    if (uniqueProjectIds.length !== new Set(projectIds).size) {
-      result.warnings.unshift('One or more invalid project IDs were ignored.');
-    }
-    return result;
-  }
-
   private async findProjectsByNameOrPath(value: string, signal?: AbortSignal): Promise<GitLabProject[]> {
     if (value.includes('/')) {
       return [await this.http.request<GitLabProject>(`/projects/${encodeURIComponent(value)}`, 30_000, signal)];

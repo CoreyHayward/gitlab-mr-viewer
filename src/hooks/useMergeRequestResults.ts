@@ -2,16 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitLabService, type MergeRequestPageCursor } from '@/services/gitlab';
-import type { FilterOptions, GitLabMergeRequest, GitLabProject } from '@/types/gitlab';
+import type { FilterOptions, GitLabMergeRequest } from '@/types/gitlab';
 
 type UseMergeRequestResultsOptions = {
   service: GitLabService | null;
-  selectedProjects: GitLabProject[];
   filters: FilterOptions;
   enabled: boolean;
 };
 
-export function useMergeRequestResults({ service, selectedProjects, filters, enabled }: UseMergeRequestResultsOptions) {
+export function useMergeRequestResults({ service, filters, enabled }: UseMergeRequestResultsOptions) {
   const [mergeRequests, setMergeRequests] = useState<GitLabMergeRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -24,7 +23,6 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
   const nextCursorRef = useRef<MergeRequestPageCursor | null>(null);
   const queryKey = JSON.stringify({
     instance: service?.getInstanceUrl() ?? null,
-    projectIds: selectedProjects.map(({ id }) => id),
     filters: Object.fromEntries(Object.entries(filters).sort(([left], [right]) => left.localeCompare(right)))
   });
 
@@ -47,11 +45,7 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
     }
 
     try {
-      const result = selectedProjects.length === 0
-        ? await service.getAllMergeRequests(filters, controller.signal, cursor)
-        : selectedProjects.length === 1
-          ? await service.getMergeRequests(selectedProjects[0].id, filters, controller.signal, cursor)
-          : await service.getMergeRequestsForProjects(selectedProjects.map((project) => project.id), filters, controller.signal, cursor);
+      const result = await service.getAllMergeRequests(filters, controller.signal, cursor);
       if (controller.signal.aborted) return;
 
       const detailWarnings: string[] = [];
@@ -93,7 +87,7 @@ export function useMergeRequestResults({ service, selectedProjects, filters, ena
         setLoadingMore(false);
       }
     }
-  }, [enabled, filters, queryKey, selectedProjects, service]);
+  }, [enabled, filters, queryKey, service]);
 
   const reset = useCallback(() => {
     requestControllerRef.current?.abort();
