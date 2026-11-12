@@ -282,12 +282,11 @@ describe('GitLab merge request loading', () => {
     expect(maximumActiveAuthorQueries).toBe(8);
   });
 
-  it('applies exact project name and path filters after enrichment', async () => {
+  it('loads a filtered project by path instead of paging through member projects', async () => {
     const fetchMock = vi.fn(async (input: string | URL) => {
       const url = new URL(String(input));
-      if (url.pathname === '/api/v4/projects') return apiResponse([project(7, 'Viewer'), project(8, 'Other')]);
+      if (url.pathname === '/api/v4/projects/group%2Fviewer') return apiResponse(project(7, 'Viewer'));
       if (url.pathname === '/api/v4/projects/7/merge_requests') return apiResponse([mergeRequest(1, 7)]);
-      if (url.pathname === '/api/v4/projects/8/merge_requests') return apiResponse([mergeRequest(2, 8)]);
       if (url.pathname.endsWith('/user')) return apiResponse(user);
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -298,6 +297,44 @@ describe('GitLab merge request loading', () => {
     });
 
     expect(result.mergeRequests.map((item) => item.project?.path_with_namespace)).toEqual(['group/viewer']);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('finds a filtered project by exact name among member projects', async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v4/projects') {
+        expect(url.searchParams.get('search')).toBe('Viewer');
+        return apiResponse([project(7, 'Viewer'), project(8, 'Viewer Docs')]);
+      }
+      if (url.pathname === '/api/v4/projects/7/merge_requests') return apiResponse([mergeRequest(1, 7)]);
+      if (url.pathname.endsWith('/user')) return apiResponse(user);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new GitLabService('https://gitlab.example.com', 'token').getAllMergeRequests({
+      projects: ['Viewer']
+    });
+
+    expect(result.mergeRequests.map((item) => item.id)).toEqual([1]);
+  });
+
+  it('warns about filtered projects that cannot be found', async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v4/projects/group%2Fmissing') return apiResponse({ message: '404 Project Not Found' }, { status: 404 });
+      if (url.pathname.endsWith('/user')) return apiResponse(user);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new GitLabService('https://gitlab.example.com', 'token').getAllMergeRequests({
+      projects: ['group/missing']
+    });
+
+    expect(result.mergeRequests).toEqual([]);
+    expect(result.warnings).toEqual([expect.stringContaining('group/missing')]);
   });
 
   it('ignores malformed project cache entries and refreshes them from GitLab', async () => {

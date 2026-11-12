@@ -1046,11 +1046,62 @@ export class GitLabService {
     return result;
   }
 
+  private async findProjectsByNameOrPath(value: string, signal?: AbortSignal): Promise<GitLabProject[]> {
+    if (value.includes('/')) {
+      return [await this.http.request<GitLabProject>(`/projects/${encodeURIComponent(value)}`, 30_000, signal)];
+    }
+    const candidates = await this.http.requestAllPages<GitLabProject>(
+      `/projects?membership=true&simple=true&search=${encodeURIComponent(value)}`,
+      30_000,
+      signal,
+      5
+    );
+    return candidates.filter((project) => project.name.toLowerCase() === value.toLowerCase());
+  }
+
+  private async getMergeRequestsForFilteredProjects(
+    projectFilters: string[],
+    filters: FilterOptions,
+    signal?: AbortSignal
+  ): Promise<MergeRequestLoadResult> {
+    const warnings: string[] = [];
+    const lookups = await mapWithConcurrency(projectFilters, 4, (value) => this.findProjectsByNameOrPath(value, signal));
+    const projectsById = new Map<number, GitLabProject>();
+
+    lookups.forEach((lookup, index) => {
+      const value = projectFilters[index];
+      if (lookup.status === 'rejected') {
+        if (isCancelled(lookup.reason)) throw lookup.reason;
+        warnings.push(`Project ${value} could not be loaded: ${messageFrom(lookup.reason)}`);
+        return;
+      }
+      if (lookup.value.length === 0) warnings.push(`No project named ${value} was found.`);
+      lookup.value.forEach((project) => projectsById.set(project.id, project));
+    });
+
+    const projects = Array.from(projectsById.values());
+    if (projects.length === 0) return { mergeRequests: [], nextCursor: null, warnings };
+
+    const targets = buildMergeRequestTargets(projects.map((project) => ({
+      endpoint: `/projects/${project.id}/merge_requests`,
+      label: project.path_with_namespace
+    })), filters);
+    const result = await this.loadMergeRequestTargets(targets, filters, signal, projects);
+    return { ...result, warnings: Array.from(new Set([...warnings, ...result.warnings])) };
+  }
+
   async getAllMergeRequests(
     filters: FilterOptions = {},
     signal?: AbortSignal,
     cursor?: MergeRequestPageCursor | null
   ): Promise<MergeRequestLoadResult> {
+    const projectFilters = uniqueStrings(filters.projects);
+    if (projectFilters.length > 0) {
+      return cursor
+        ? this.loadMergeRequestTargets(cursor.targets, filters, signal)
+        : this.getMergeRequestsForFilteredProjects(projectFilters, filters, signal);
+    }
+
     const authors = uniqueStrings(filters.authors);
     if (authors.length > 0 && authors.length <= MAX_GLOBAL_AUTHOR_QUERIES) {
       const targets = cursor?.targets ?? buildMergeRequestTargets([{

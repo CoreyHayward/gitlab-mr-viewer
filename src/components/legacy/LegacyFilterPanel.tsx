@@ -4,15 +4,10 @@ import { useEffect, useState } from 'react';
 import { FilterOptions } from '@/types/gitlab';
 import { GitLabService } from '@/services/gitlab';
 import LegacyUserMultiSelect from './LegacyUserMultiSelect';
-import { MAX_SHARED_LIST_VALUE_LENGTH, MAX_SHARED_LIST_VALUES, MAX_SHARED_TEXT_LENGTH } from '@/utils/urlState';
+import LegacyProjectMultiSelect from './LegacyProjectMultiSelect';
+import { MAX_SHARED_TEXT_LENGTH } from '@/utils/urlState';
 import { MAX_CUSTOM_QUICK_FILTER_NAME_LENGTH } from '@/utils/customQuickFilters';
-import { Filter, ChevronDown, Search, Ban, Layers, Trash2, Check, X } from 'lucide-react';
-
-const parseProjects = (value: string) => Array.from(new Set(value
-  .split(',')
-  .map((project) => project.trim().slice(0, MAX_SHARED_LIST_VALUE_LENGTH))
-  .filter(Boolean)))
-  .slice(0, MAX_SHARED_LIST_VALUES);
+import { Filter, ChevronDown, Search, Ban, Trash2, Check, X } from 'lucide-react';
 
 interface FilterPanelProps {
   filters: FilterOptions;
@@ -29,7 +24,6 @@ interface FilterPanelProps {
 
 export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded, onToggle, service, canSaveQuickFilter, onSaveQuickFilter, editingViewName, editError, onSaveEditedView }: FilterPanelProps) {
   const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
-  const [projectInput, setProjectInput] = useState(filters.projects?.join(', ') ?? '');
   const [savingView, setSavingView] = useState(false);
   const [viewName, setViewName] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
@@ -40,9 +34,6 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
 
   useEffect(() => {
     setLocalFilters(filters);
-    setProjectInput((current) => JSON.stringify(parseProjects(current)) === JSON.stringify(filters.projects ?? [])
-      ? current
-      : filters.projects?.join(', ') ?? '');
   }, [filters]);
 
   useEffect(() => {
@@ -60,16 +51,9 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
     onFiltersChange(newFilters);
   };
 
-  const handleProjectsChange = (value: string) => {
-    setProjectInput(value);
-    const projects = parseProjects(value);
-    handleFilterChange('projects', projects.length > 0 ? projects : undefined);
-  };
-
   const clearFilters = () => {
     const emptyFilters: FilterOptions = { state: localFilters.state ?? 'opened' };
     setLocalFilters(emptyFilters);
-    setProjectInput('');
     onFiltersChange(emptyFilters);
   };
 
@@ -183,25 +167,12 @@ export default function LegacyFilterPanel({ filters, onFiltersChange, isExpanded
                   </div>
                 </div>
 
-                <div className="space-y-2 sm:col-span-2">
-                  <label htmlFor="merge-request-project-filter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Project names or paths
-                    <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">(exact name or path; up to {MAX_SHARED_LIST_VALUES})</span>
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Layers className="w-4 h-4 text-gray-400" />
-                    </div>
-                    <input
-                      id="merge-request-project-filter"
-                      type="text"
-                      maxLength={(MAX_SHARED_LIST_VALUE_LENGTH + 2) * MAX_SHARED_LIST_VALUES}
-                      value={projectInput}
-                      onChange={(e) => handleProjectsChange(e.target.value)}
-                      placeholder="project1, group/project2, ..."
-                      className="w-full pl-10 pr-3 py-2.5 text-sm bg-white dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#e24329]/20 focus:border-[#e24329] dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all duration-200 hover:border-gray-400 dark:hover:border-neutral-500"
-                    />
-                  </div>
+                <div className="sm:col-span-2">
+                  <LegacyProjectMultiSelect
+                    service={service}
+                    selectedProjects={localFilters.projects || []}
+                    onProjectsChange={(projects) => handleFilterChange('projects', projects.length > 0 ? projects : undefined)}
+                  />
                 </div>
               </div>
             </div>
